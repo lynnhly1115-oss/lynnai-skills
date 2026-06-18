@@ -1,0 +1,4 @@
+interface:
+  display_name: "短剧顺场表"
+  short_description: "把短剧 Word/PDF 剧本整理成顺场表 Excel"
+  default_prompt: "Use $duanju-schedule-table to turn these short-drama Word or PDF scripts into checked Excel 顺场表 files."

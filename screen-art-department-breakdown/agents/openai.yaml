@@ -1,0 +1,3 @@
+interface:
+  display_name: "影视美术拆解"
+  short_description: "从剧本生成顺场、分场、场景汇总和置景道具执行表"
