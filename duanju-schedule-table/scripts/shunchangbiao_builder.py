@@ -578,15 +578,21 @@ def default_mark(role: str) -> str:
 
 
 def short_summary(scene: dict) -> str:
+    fragments = []
     for line in scene["body"]:
         line = re.sub(r"^△", "", line).strip()
         line = re.sub(r"【[^】]*】", "", line)
         line = re.sub(r"[（(].*?[）)]", "", line)
         line = re.sub(r"^\w+[:：；;]", "", line).strip()
         line = re.sub(r"[，。！？、\s]+", "", line)
-        if len(line) >= 8:
-            return line[:15]
-    return scene["scene"] + "剧情"
+        if line:
+            fragments.append(line)
+        candidate = "".join(fragments)
+        if len(candidate) >= 12:
+            return candidate[:18]
+    if fragments:
+        return "".join(fragments)[:18]
+    return "本场拍摄内容需要人工补写"
 
 
 def collect_groups(scene: dict) -> str:

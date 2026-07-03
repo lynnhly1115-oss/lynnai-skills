@@ -18,7 +18,9 @@ Use this skill to turn short-drama scripts from Word or PDF into the user's pref
 - Keep `页数` in the header but leave all page cells blank unless the user explicitly provides page counts.
 - Put role names in individual header columns. Mark scene appearances with a one-character abbreviation in the role's column.
 - Use vertical headers only for role columns and the short columns `日/夜`, `内/外`, `页数`. Keep all other headers horizontal.
-- `拍摄内容` should be a concise scene summary, preferably 8-15 Chinese characters and no more than 15 characters.
+- `拍摄内容` must be a concise action/event summary in 12-18 Chinese characters. Write it as "who + does what / what happens", not as a short label.
+  - Good: `顾宴赶到前台当众维护母亲`
+  - Good: `陆延赶到河边当众救下小满`
 - Keep `拍摄顺序` in script order unless the user provides a separate shooting order.
 
 ## Workflow
@@ -40,7 +42,7 @@ Use this skill to turn short-drama scripts from Word or PDF into the user's pref
 5. Build role columns from `人物` lines. Treat `若干`, `众人`, `公司员工若干`, `应聘者若干`, and similar group labels as `群演`, not actor columns, unless the user wants them split.
 6. Fill:
    - `剧本中场景`: source scene location text, lightly normalized only for spacing.
-   - `拍摄内容`: summarize the actual scene action, not the episode title.
+   - `拍摄内容`: summarize the actual scene action, not the episode title. Keep it 12-18 Chinese characters and avoid label-like short phrases.
    - `群演`: groups appearing in `人物` lines or obvious crowd/action text.
    - `梳化服提示`: youth/old-age state, pregnancy, injury, wet clothes, illness, formalwear, uniforms, plain/poverty looks, special styling.
    - `道具提示`: only practical on-screen props needed for the scene. Avoid false positives from dialogue, metaphors, or recalled events.
@@ -75,9 +77,9 @@ Before sending or finalizing, verify all of these:
 - For PDFs with original repeated or skipped scene numbers, keep every scene in script order and record source-number anomalies in check notes or remarks.
 - `日/夜`, `内/外`, and `页数` appear immediately after `拍摄内容` and before the role columns.
 - `实际拍摄场地` and `页数` cells are blank when expected.
-- Every `拍摄内容` cell is filled and <=15 characters.
+- Every `拍摄内容` cell is filled and 12-18 Chinese characters; rewrite any label-like short phrase.
 - Role columns are split individually; no combined actor list cell.
 - No extra `演员` / `角色` rows exist.
 - `若干` groups are in `群演`, not role columns.
 - Visual preview is nonblank and shows only role/日夜/内外/页数 headers vertically.
-- Save the checked `.xlsx` output files and report their paths. Do not send files to WeChat or any chat app unless the user explicitly asks in the current task and provides the destination.
+- Save the checked `.xlsx` output files and deliver them in the current agent conversation when attachments are supported; otherwise report their exact local paths. Do not add a third-party messaging-app delivery step to the default workflow.
