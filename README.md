@@ -9,6 +9,7 @@ focus is short-drama scheduling, scene ordering, and art-department prep.
 ![Skills](https://img.shields.io/badge/skills-2-1f4e5f)
 ![Codex](https://img.shields.io/badge/Codex-skills-2b6cb0)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 ## What's Inside
 
@@ -39,6 +40,15 @@ Restart Codex after installing. Then you can ask:
 ```text
 Use $duanju-schedule-table to turn this short-drama script into a checked Excel 顺场表.
 ```
+
+## Other Agents
+
+These workflows are not limited to Codex. Any agent that can read files and run
+Python can use the skills manually:
+
+- Read [AGENTS.md](AGENTS.md) for generic agent instructions.
+- Read [HERMES.md](HERMES.md) for a Hermes-ready prompt and command examples.
+- Then read the target skill's `SKILL.md` before running a helper script.
 
 ## Short-Drama Schedule Tables
 
@@ -123,6 +133,9 @@ python3 scripts/validate_skills.py . --compile-scripts
 
 ```text
 lynnai-skills/
+├── AGENTS.md
+├── HERMES.md
+├── LICENSE
 ├── duanju-schedule-table/
 │   ├── SKILL.md
 │   ├── agents/
@@ -155,5 +168,4 @@ checklist.
 
 ## License
 
-No license file has been added yet. Until a license is added, treat this as a
-public source-available repository rather than a formally open-source package.
+MIT. See [LICENSE](LICENSE).
