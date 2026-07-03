@@ -82,4 +82,4 @@ Before sending or finalizing, verify all of these:
 - No extra `演员` / `角色` rows exist.
 - `若干` groups are in `群演`, not role columns.
 - Visual preview is nonblank and shows only role/日夜/内外/页数 headers vertically.
-- Save the checked `.xlsx` output files and deliver them in the current agent conversation when attachments are supported; otherwise report their exact local paths. Do not add a third-party messaging-app delivery step to the default workflow.
+- Save the checked `.xlsx` output files and return them in the current agent conversation when attachments are supported; otherwise report their exact local paths.
