@@ -66,9 +66,42 @@ GROUP_HINTS = (
     "工作人员",
     "代表",
     "老村民",
+    "股东",
+    "参会人",
+    "客人",
+    "夜枭成员",
+    "保安",
 )
 
+DAY_RE = r"日|夜|清晨|上午|下午|傍晚|深夜|凌晨"
+IO_RE = r"内外|内|外"
+
 PROP_KEYWORDS = [
+    ("轮椅", "轮椅"),
+    ("防爆盾", "防爆盾"),
+    ("电棍", "电棍"),
+    ("子弹", "子弹/枪械效果"),
+    ("狙击手", "枪械效果"),
+    ("婴儿车", "婴儿车"),
+    ("奶瓶", "奶瓶"),
+    ("纸尿裤", "纸尿裤"),
+    ("襁褓", "襁褓"),
+    ("书信", "书信"),
+    ("推荐信", "推荐信"),
+    ("门把手", "门把手"),
+    ("清单", "清单"),
+    ("运动衣", "运动衣"),
+    ("菜刀", "菜刀"),
+    ("鞭子", "鞭子"),
+    ("遥控器", "遥控器"),
+    ("炸弹", "炸弹道具"),
+    ("棍棒", "棍棒"),
+    ("竞标方案", "竞标方案"),
+    ("投影", "投影屏"),
+    ("公章", "公章"),
+    ("股权书", "股权书"),
+    ("短刀", "短刀"),
+    ("银针", "银针"),
     ("横幅", "横幅"),
     ("手机", "手机"),
     ("电话", "手机/电话"),
@@ -126,29 +159,84 @@ def cn_episode_to_int(value: str) -> int | None:
     return CN_EPISODES.get(value)
 
 
+def normalize_scene_heading(text: str) -> str:
+    text = text.replace("　", " ").strip()
+    text = re.sub(r"^[•·●○▪■□◆◇◦\-\s]+", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def clean_location(location: str) -> str:
+    location = location.strip(" 　-=—")
+    location = re.sub(r"\s*-\s*", "-", location)
+    location = re.sub(r"\s+", " ", location)
+    return location
+
+
 def is_scene_heading(text: str) -> bool:
-    explicit = r"^\d+-\d+\s*(?:(?:日|夜|清晨|上午|下午|傍晚|深夜|凌晨)\s*)?(?:内外|内|外)\s*.+$"
-    generated = r"^(?:日|夜|清晨|上午|下午|傍晚|深夜|凌晨)\s*(?:内外|内|外)\s*.+$"
-    return bool(re.match(explicit, text) or re.match(generated, text))
+    text = normalize_scene_heading(text)
+    if not text or any(mark in text for mark in "：:。？！；;"):
+        return False
+    explicit_day_first = rf"^\d+-\d+\s*(?:{DAY_RE})\s*(?:{IO_RE})\s*.+$"
+    explicit_location_first = rf"^\d+-\d+\s*.+?(?:{DAY_RE})\s*(?:{IO_RE})$"
+    generated_day_first = rf"^(?:{DAY_RE})\s*(?:{IO_RE})\s*.+$"
+    generated_location_first = rf"^.+?(?:{DAY_RE})\s*(?:{IO_RE})$"
+    return bool(
+        re.match(explicit_day_first, text)
+        or re.match(explicit_location_first, text)
+        or re.match(generated_day_first, text)
+        or re.match(generated_location_first, text)
+    )
 
 
 def parse_heading(text: str, episode: int | None, scene_count: dict[int, int], last_day: str) -> tuple[str, str, str, str, str] | None:
+    text = normalize_scene_heading(text)
     explicit = re.match(
-        r"^(\d+)-(\d+)\s*(?:(日|夜|清晨|上午|下午|傍晚|深夜|凌晨)\s*)?(内外|内|外)\s*(.+)$",
+        rf"^(\d+)-(\d+)\s*(?:(?P<day>{DAY_RE})\s*)?(?P<io>{IO_RE})\s*(?P<location>.+)$",
         text,
     )
     if explicit:
         ep = int(explicit.group(1))
         no = int(explicit.group(2))
         scene_count[ep] = max(scene_count.get(ep, 0), no)
-        day = explicit.group(3) or last_day or "日"
-        warning = "" if explicit.group(3) else "day inferred"
-        return f"{ep}-{no}", normalize_day(day), explicit.group(4), explicit.group(5).strip(), warning
+        day = explicit.group("day") or last_day or "日"
+        warning = "" if explicit.group("day") else "day inferred"
+        return f"{ep}-{no}", normalize_day(day), explicit.group("io"), clean_location(explicit.group("location")), warning
 
-    generated = re.match(r"^(日|夜|清晨|上午|下午|傍晚|深夜|凌晨)\s*(内外|内|外)\s*(.+)$", text)
+    explicit_location_first = re.match(
+        rf"^(\d+)-(\d+)\s*(?P<location>.+?)\s*(?P<day>{DAY_RE})\s*(?P<io>{IO_RE})$",
+        text,
+    )
+    if explicit_location_first:
+        ep = int(explicit_location_first.group(1))
+        no = int(explicit_location_first.group(2))
+        scene_count[ep] = max(scene_count.get(ep, 0), no)
+        return (
+            f"{ep}-{no}",
+            normalize_day(explicit_location_first.group("day")),
+            explicit_location_first.group("io"),
+            clean_location(explicit_location_first.group("location")),
+            "",
+        )
+
+    generated = re.match(rf"^({DAY_RE})\s*({IO_RE})\s*(.+)$", text)
     if generated and episode:
         scene_count[episode] = scene_count.get(episode, 0) + 1
-        return f"{episode}-{scene_count[episode]}", normalize_day(generated.group(1)), generated.group(2), generated.group(3).strip(), ""
+        return f"{episode}-{scene_count[episode]}", normalize_day(generated.group(1)), generated.group(2), clean_location(generated.group(3)), ""
+
+    generated_location_first = re.match(
+        rf"^(?P<location>.+?)\s*(?P<day>{DAY_RE})\s*(?P<io>{IO_RE})$",
+        text,
+    )
+    if generated_location_first and episode:
+        scene_count[episode] = scene_count.get(episode, 0) + 1
+        return (
+            f"{episode}-{scene_count[episode]}",
+            normalize_day(generated_location_first.group("day")),
+            generated_location_first.group("io"),
+            clean_location(generated_location_first.group("location")),
+            "",
+        )
     return None
 
 
@@ -163,7 +251,10 @@ def normalize_day(day: str) -> str:
 def normalize_person(name: str) -> str:
     name = re.sub(r"【[^】]*】", "", name)
     name = re.sub(r"[（(][^）)]*[）)]", "", name)
+    name = re.sub(r"[*＊]\s*\d+$", "", name)
     name = name.strip(" 　、，,;；:：")
+    if re.fullmatch(r"[Nn\d]+", name):
+        return ""
     if name in {"人物", "人物小传", "人物小传："}:
         return ""
     return name
@@ -171,6 +262,8 @@ def normalize_person(name: str) -> str:
 
 def split_people(line: str) -> list[str]:
     line = re.sub(r"^人物\s*[:：;；]?", "", line.strip())
+    line = re.sub(r"([一-龥A-Za-z]+)\s+([Nn])(?=$|[、，,\s])", r"\1\2", line)
+    line = re.sub(r"([一-龥A-Za-z]+)\s+(\d+)(?=$|[、，,\s])", r"\1", line)
     parts = re.split(r"[、，,\s]+", line)
     result = []
     for part in parts:
@@ -178,6 +271,31 @@ def split_people(line: str) -> list[str]:
         if name:
             result.append(name)
     return result
+
+
+def augment_visible_people(scenes: list[dict]) -> None:
+    candidates = ordered_unique(
+        person
+        for scene in scenes
+        for person in scene.get("people", [])
+        if not is_group_name(person)
+    )
+    for scene in scenes:
+        people = list(scene.get("people", []))
+        for role in candidates:
+            if role in people:
+                continue
+            pattern = re.escape(role)
+            for line in scene.get("body", []):
+                text = line.lstrip("△").strip()
+                if re.match(rf"^{pattern}VO\b", text, flags=re.IGNORECASE):
+                    continue
+                if re.match(rf"^{pattern}(?:[（(][^）)]*[）)])?[:：]", text) or (
+                    line.startswith("△") and text.startswith(role)
+                ):
+                    people.append(role)
+                    break
+        scene["people"] = people
 
 
 def parse_docx(path: Path) -> list[dict]:
@@ -245,6 +363,7 @@ def parse_docx(path: Path) -> list[dict]:
             body.append(text)
         scene["body"] = body
         scene["body_text"] = "\n".join(body)
+    augment_visible_people(scenes)
     return scenes
 
 
@@ -435,7 +554,7 @@ def ordered_unique(items: list[str]) -> list[str]:
 
 
 def is_group_name(name: str) -> bool:
-    return any(hint in name for hint in GROUP_HINTS) and "保安" not in name
+    return any(hint in name for hint in GROUP_HINTS)
 
 
 def infer_roles(scenes: list[dict]) -> list[tuple[str, str]]:
@@ -475,7 +594,7 @@ def collect_groups(scene: dict) -> str:
     text = scene["people_raw"] + "\n" + scene["body_text"]
     for person in scene["people"]:
         if is_group_name(person):
-            groups.append(person.replace("若干", ""))
+            groups.append(re.sub(r"(若干|[Nn]|\d+)$", "", person))
     if re.search(r"众人|所有人|全场|会议室里的人|各位", text):
         groups.append("会议人员" if "会议" in scene["location"] else "众人")
     if re.search(r"应聘者|面试者", text):
@@ -491,6 +610,8 @@ def collect_props(scene: dict) -> str:
     text = scene["body_text"]
     props = []
     for keyword, label in PROP_KEYWORDS:
+        if keyword == "刀" and not re.search(r"持刀|抽出.*刀|举刀|刀刃|刀身|刀尖|短刀|菜刀|水果刀|美工刀|手中.*刀|刀.*砍|刀.*刺", text):
+            continue
         if keyword in text:
             props.append(label)
     if "头发" in text and re.search(r"拔了几根|扯了几根|亲子鉴定", text):
@@ -500,6 +621,10 @@ def collect_props(scene: dict) -> str:
         props.remove("刀具")
     if "美工刀" in props and "刀具" in props:
         props.remove("刀具")
+    if "子弹/枪械效果" in props and "枪械效果" in props:
+        props.remove("枪械效果")
+    if "手机" in props and "手机/电话" in props:
+        props.remove("手机/电话")
     return "、".join(props[:8])
 
 
@@ -540,7 +665,7 @@ def collect_notes(scene: dict) -> str:
         notes.append("含VO")
     if re.search(r"闪回|回忆", text):
         notes.append("闪回/回忆")
-    if re.search(r"吻|亲|床上|压在|抱住乱亲|衣衫不整", text):
+    if re.search(r"接吻|亲吻|强吻|乱亲|床上|压在|抱住.*亲|衣衫不整|睡裙|钻进被窝", text):
         notes.append("亲密戏注意尺度")
     if re.search(r"扭打|持刀|水果刀|美工刀|踹开|砸|扑倒|推倒|滚远|撞在地上|拽|拉扯|摔", text):
         notes.append("动作戏注意安全")
