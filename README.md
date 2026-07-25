@@ -4,9 +4,10 @@ Personal Codex skills for Chinese short-drama production workflows.
 
 This repository packages reusable `SKILL.md`-based agents and helper scripts
 that turn screenplay files into production-ready Excel workbooks. The current
-focus is short-drama scheduling, scene ordering, and art-department prep.
+focus is short-drama scheduling, AI live-action asset inventories, and
+art-department prep.
 
-![Skills](https://img.shields.io/badge/skills-2-1f4e5f)
+![Skills](https://img.shields.io/badge/skills-3-1f4e5f)
 ![Codex](https://img.shields.io/badge/Codex-skills-2b6cb0)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -15,7 +16,8 @@ focus is short-drama scheduling, scene ordering, and art-department prep.
 
 | Skill | Output | Best For |
 | --- | --- | --- |
-| [`duanju-schedule-table`](duanju-schedule-table/SKILL.md) | One polished `顺场表` Excel workbook per script | 短剧顺场表、拍摄顺序表、角色出场、日夜内外、群演、梳化服、道具提示 |
+| [`duanju-schedule-table`](duanju-schedule-table/SKILL.md) | One strictly checked `顺场表` Excel workbook per script | 短剧顺场表、拍摄顺序表、角色出场、日夜内外、群演、梳化服、道具提示 |
+| [`ai-live-action-asset-breakdown`](ai-live-action-asset-breakdown/SKILL.md) | One `资产统计表` workbook per project, with reserved image cells | AI真人剧资产统计、按集累计去重、人物/场景/戏用道具、资产变体 |
 | [`screen-art-department-breakdown`](screen-art-department-breakdown/SKILL.md) | A four-sheet art prep workbook: `顺场表`, `分场表`, `场景表`, `置景道具执行表` | 美术指导、场景拆解、置景道具、采买制作、特殊道具整理 |
 
 ## Quick Start
@@ -32,6 +34,7 @@ Install the skills into Codex by symlinking them into `~/.codex/skills`:
 ```bash
 mkdir -p "$HOME/.codex/skills"
 ln -s "$PWD/duanju-schedule-table" "$HOME/.codex/skills/duanju-schedule-table"
+ln -s "$PWD/ai-live-action-asset-breakdown" "$HOME/.codex/skills/ai-live-action-asset-breakdown"
 ln -s "$PWD/screen-art-department-breakdown" "$HOME/.codex/skills/screen-art-department-breakdown"
 ```
 
@@ -41,10 +44,16 @@ Restart Codex after installing. Then you can ask:
 Use $duanju-schedule-table to turn this short-drama script into a checked Excel 顺场表.
 ```
 
+Or create an AI live-action asset inventory:
+
+```text
+Use $ai-live-action-asset-breakdown to read this complete script and create a deduplicated Excel asset inventory with image placeholders.
+```
+
 ## Other Agents
 
 These workflows are not limited to Codex. Any agent that can read files and run
-Python can use the skills manually:
+the required Python or Node.js helper can use the skills manually:
 
 - Read [AGENTS.md](AGENTS.md) for generic agent instructions.
 - Read [HERMES.md](HERMES.md) for a Hermes-ready prompt and command examples.
@@ -75,19 +84,40 @@ day/night and interior/exterior markers written in different positions,
 embedded flashbacks, montage headings, group characters, and practical prop
 notes.
 
-Run the helper script directly:
+Generate a draft parse for review:
 
 ```bash
-python3 duanju-schedule-table/scripts/shunchangbiao_builder.py script.docx --out-dir output
+python3 duanju-schedule-table/scripts/shunchangbiao_builder.py script.docx \
+  --out-dir work \
+  --dump-json work/scenes.json \
+  --report work/validation.json
 ```
 
-Useful options:
+After reviewing every scene with the bundled config schema, run the strict build:
 
 ```bash
 python3 duanju-schedule-table/scripts/shunchangbiao_builder.py script.docx \
   --out-dir output \
-  --dump-json output/scenes.json
+  --config reviewed.json \
+  --report output/validation.json \
+  --strict
 ```
+
+## AI Live-Action Asset Inventories
+
+`ai-live-action-asset-breakdown` reads a complete film, TV, or short-drama
+script and creates one single-sheet asset inventory. It lists only the first
+visible appearance of each character, playable scene, and actor-used prop.
+Meaningful visual changes such as clothing, age, disguise, injury, damage,
+day/night, screen content, or activation are recorded as variants.
+
+The workbook keeps one sheet named `资产统计表`, groups assets by episode and
+category, adds formula-driven subtotals and a cumulative total, and reserves
+three image cells for characters and props or six for scenes.
+
+Read the skill and its JSON schema before running the builder. The script uses
+Node.js and `@oai/artifact-tool`; in Codex, use the bundled workspace runtime
+returned by `load_workspace_dependencies`.
 
 ## Art Department Workbooks
 
@@ -136,12 +166,17 @@ lynnai-skills/
 ├── AGENTS.md
 ├── HERMES.md
 ├── LICENSE
+├── ai-live-action-asset-breakdown/
+│   ├── SKILL.md
+│   ├── agents/openai.yaml
+│   ├── references/inventory-schema.md
+│   └── scripts/build_asset_workbook.mjs
 ├── duanju-schedule-table/
 │   ├── SKILL.md
-│   ├── agents/
-│   │   └── openai.yaml
-│   └── scripts/
-│       └── shunchangbiao_builder.py
+│   ├── agents/openai.yaml
+│   ├── references/review-config.md
+│   ├── scripts/shunchangbiao_builder.py
+│   └── tests/test_shunchangbiao_builder.py
 ├── screen-art-department-breakdown/
 │   ├── SKILL.md
 │   ├── agents/
@@ -158,6 +193,9 @@ lynnai-skills/
 - Treat generated workbook drafts as drafts. Review scene counts, scene IDs,
   role columns, group characters, day/night, interior/exterior, props, costume
   hints, and notes before delivery.
+- For AI asset inventories, read the complete script first, keep only first
+  appearances, preserve meaningful variants, and exclude background dressing
+  from the prop category.
 - Keep generated `.xlsx`, `.json`, screenshots, and temporary script files out
   of the skill repository unless they are intentional fixtures.
 

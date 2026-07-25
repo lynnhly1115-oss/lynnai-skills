@@ -10,6 +10,9 @@ Use this checklist when adding or updating a skill.
 - Do not add README, changelog, install guide, or other repo-style docs inside a
   skill folder.
 - Put reusable code in `scripts/`.
+- Put reusable schemas and review contracts in `references/`.
+- Put deterministic tests in `tests/` when a parser or validator has meaningful
+  edge cases.
 - Put optional UI metadata in `agents/openai.yaml`.
 
 ## SKILL.md
@@ -31,3 +34,8 @@ python3 scripts/validate_skills.py . --compile-scripts
 Also run at least one realistic manual test for any script or workflow you
 changed.
 
+For the schedule-table parser, run its bundled unit tests:
+
+```bash
+python3 -m unittest discover -s duanju-schedule-table/tests -v
+```

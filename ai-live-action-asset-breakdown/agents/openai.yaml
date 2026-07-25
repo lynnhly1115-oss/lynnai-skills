@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI真人剧资产统计"
+  short_description: "从完整剧本按集去重人物、场景和戏用道具并生成Excel"
+  default_prompt: "使用 $ai-live-action-asset-breakdown 读取完整剧本，按集累计去重并生成带图片位的单表 Excel 资产统计表。"

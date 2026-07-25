@@ -14,6 +14,14 @@ Use `duanju-schedule-table` when the user asks for:
 - role columns, day/night, interior/exterior, group extras, costume, prop, or
   note extraction from a script
 
+Use `ai-live-action-asset-breakdown` when the user asks for:
+
+- AI真人剧资产统计
+- 人物、场景、戏用道具资产表
+- 按集累计去重
+- 服装、年龄、伪装、伤妆、损毁或环境状态变体
+- 后续可插入生成图片的 Excel 图片位
+
 Use `screen-art-department-breakdown` when the user asks for:
 
 - 美术拆解
@@ -28,10 +36,11 @@ Use `screen-art-department-breakdown` when the user asks for:
 
 1. Clone this repository.
 2. Read the relevant `SKILL.md` completely before touching files.
-3. Use the helper script in that skill's `scripts/` directory.
-4. Generate a draft workbook and, when useful, a JSON scene dump.
-5. Review the workbook against the required checks in `SKILL.md`.
-6. Return the final `.xlsx` path to the user.
+3. Read any schema or review reference linked directly from `SKILL.md`.
+4. Use the helper script in that skill's `scripts/` directory.
+5. Generate a draft workbook and, when useful, a JSON scene or asset dump.
+6. Review the workbook against the required checks in `SKILL.md`.
+7. Return the final `.xlsx` path to the user.
 
 Example:
 
@@ -52,6 +61,14 @@ The helper scripts expect Python 3 with these packages available:
 If the default Python is missing packages, use the host agent's bundled
 workspace Python or create a local virtual environment outside this repository.
 
+The AI live-action asset builder additionally requires:
+
+- Node.js
+- `@oai/artifact-tool`
+
+When running in Codex, use the bundled workspace dependency paths returned by
+`load_workspace_dependencies`.
+
 ## Quality Rules
 
 - Do not trust the first draft blindly. Scripts are helpers, not the final
@@ -61,6 +78,9 @@ workspace Python or create a local virtual environment outside this repository.
   and extra scenes instead of silently dropping them.
 - Keep generated workbooks, JSON dumps, screenshots, and temporary files out of
   this repository unless they are intentional fixtures.
+- Keep schedule-table work and AI asset inventory work separate. Schedule
+  tables repeat practical scene needs; asset inventories keep only the first
+  visible appearance and add meaningful visual variants.
 - Do not send files to WeChat, Slack, email, or any chat app unless the user
   explicitly asks in the current task and gives the destination.
 
