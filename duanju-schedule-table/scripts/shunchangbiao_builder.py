@@ -11,18 +11,21 @@ import tempfile
 from collections import OrderedDict
 from pathlib import Path
 
+from dependency_bootstrap import ensure_dependencies
+
+ensure_dependencies(
+    "duanju-schedule-table",
+    Path(__file__).with_name("requirements.txt"),
+    ("docx", "openpyxl", "pdfplumber"),
+)
+
+import pdfplumber
 from docx import Document
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
-
-try:
-    import pdfplumber
-except ImportError:  # pragma: no cover - dependency depends on the active runtime
-    pdfplumber = None
-
 
 CN_DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 CN_UNITS = {"十": 10, "百": 100, "千": 1000}
@@ -626,16 +629,34 @@ def parse_script(path: Path) -> list[dict]:
     if path.suffix.lower() in {".docx", ".docm"}:
         return parse_docx(path)
     if path.suffix.lower() == ".doc":
-        if shutil.which("textutil") is None:
-            raise RuntimeError("textutil is required to convert legacy .doc scripts")
         with tempfile.TemporaryDirectory(prefix="shunchangbiao-doc-") as tmpdir:
-            converted = Path(tmpdir) / f"{path.stem}.docx"
-            subprocess.run(
-                ["textutil", "-convert", "docx", "-output", str(converted), str(path)],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
+            output_dir = Path(tmpdir)
+            converted = output_dir / f"{path.stem}.docx"
+            if shutil.which("textutil"):
+                subprocess.run(
+                    ["textutil", "-convert", "docx", "-output", str(converted), str(path)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            else:
+                office = shutil.which("soffice") or shutil.which("libreoffice")
+                if office is None:
+                    raise RuntimeError(
+                        "Legacy .doc conversion requires macOS textutil or LibreOffice. "
+                        "Install LibreOffice or export the script as .docx."
+                    )
+                subprocess.run(
+                    [office, "--headless", "--convert-to", "docx", "--outdir", str(output_dir), str(path)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            if not converted.exists():
+                candidates = list(output_dir.glob("*.docx"))
+                if len(candidates) != 1:
+                    raise RuntimeError("Legacy .doc conversion did not produce a readable .docx file")
+                converted = candidates[0]
             scenes = parse_docx(converted)
         for scene in scenes:
             scene["source"] = path.name
