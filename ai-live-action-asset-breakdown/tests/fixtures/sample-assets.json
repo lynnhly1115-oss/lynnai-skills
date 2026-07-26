@@ -1,0 +1,42 @@
+{
+  "projectTitle": "《Hermes兼容测试》",
+  "episodes": [
+    {
+      "episode": "第1集",
+      "assets": [
+        {
+          "scene": "1-1",
+          "category": "人物",
+          "name": "测试角色",
+          "assetType": "基础",
+          "parent": "",
+          "description": "主要角色基础形象"
+        },
+        {
+          "scene": "1-2",
+          "category": "人物",
+          "name": "测试角色·制服变体",
+          "assetType": "变体",
+          "parent": "测试角色",
+          "description": "更换制服"
+        },
+        {
+          "scene": "1-1",
+          "category": "场景",
+          "name": "测试场景·大厅",
+          "assetType": "基础",
+          "parent": "",
+          "description": "大厅内景"
+        },
+        {
+          "scene": "1-1",
+          "category": "道具",
+          "name": "测试文件",
+          "assetType": "基础",
+          "parent": "",
+          "description": "角色手持并阅读的文件"
+        }
+      ]
+    }
+  ]
+}
