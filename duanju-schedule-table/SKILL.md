@@ -22,9 +22,10 @@ Turn a complete short-drama script into a production-facing schedule table in sc
 
 ## Workflow
 
-1. Use the Documents, PDF, and Spreadsheets skills for source handling and final workbook QA.
-2. Normalize the complete input:
+1. Resolve the directory containing this `SKILL.md`. Run all bundled scripts by absolute path so the workflow works from any Hermes workspace.
+2. Normalize the complete input with [scripts/shunchangbiao_builder.py](scripts/shunchangbiao_builder.py):
    - Convert `.doc` to `.docx` automatically with `textutil` when available.
+   - On Windows or Linux, use LibreOffice for `.doc` conversion when available.
    - Read `.docx` paragraphs and table cells in document order; include text-box text when extractable.
    - Extract text-based PDFs with `pdfplumber`. Filter repeated watermarks conservatively; never discard a font or size globally without checking real text.
    - Use OCR for scanned PDFs when available. Otherwise ask for a Word or text export.
@@ -80,12 +81,20 @@ Turn a complete short-drama script into a production-facing schedule table in sc
 
 ## Script
 
-Use `scripts/shunchangbiao_builder.py` for parsing, validation, and workbook generation.
+Use [scripts/shunchangbiao_builder.py](scripts/shunchangbiao_builder.py) for parsing, validation, and workbook generation. It loads [scripts/dependency_bootstrap.py](scripts/dependency_bootstrap.py) and [scripts/requirements.txt](scripts/requirements.txt). On first run, missing packages are installed from PyPI into the user's LynnAI cache; the Hermes environment and system Python are not modified.
+
+Install this complete skill bundle in Hermes with:
+
+```bash
+hermes skills install lynnhly1115-oss/lynnai-skills/duanju-schedule-table --yes
+```
+
+Use `python3` on macOS/Linux or `python` on Windows. Replace `<skill-dir>` with the installed directory reported by Hermes.
 
 Draft parse:
 
 ```bash
-python scripts/shunchangbiao_builder.py script.docx \
+python3 "<skill-dir>/scripts/shunchangbiao_builder.py" script.docx \
   --out-dir work \
   --dump-json work/scenes.json \
   --report work/validation.json
@@ -94,7 +103,7 @@ python scripts/shunchangbiao_builder.py script.docx \
 Final checked build:
 
 ```bash
-python scripts/shunchangbiao_builder.py script.docx \
+python3 "<skill-dir>/scripts/shunchangbiao_builder.py" script.docx \
   --out-dir output \
   --config reviewed.json \
   --report output/validation.json \
