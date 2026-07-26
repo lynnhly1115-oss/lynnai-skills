@@ -13,7 +13,7 @@ Read the complete script supplied in the current request, extract visible produc
 - Start a new workbook for every different project.
 - Rebuild from the current complete script; do not append stale data from an older script version.
 - Support DOCX, DOC, text-based PDF, scanned PDF, and plain text.
-- Use the document or PDF skill appropriate to the source. Apply OCR to scanned PDFs when available; report a blocker if reliable text cannot be recovered.
+- Use the bundled extractor for DOCX, DOC, text-based PDF, Markdown, and plain text. Apply OCR to scanned PDFs when available; report a blocker if reliable text cannot be recovered.
 - Read all episodes before extracting assets.
 
 ## Asset Rules
@@ -87,20 +87,32 @@ Create exactly one worksheet named `资产统计表` with these columns:
 
 Read [references/inventory-schema.md](references/inventory-schema.md), then create the intermediate JSON exactly as specified.
 
-Use the bundled workspace Node.js and `@oai/artifact-tool`. Copy the builder into a writable task directory before running it so Node can resolve the workspace dependency symlink:
+Install this complete skill bundle in Hermes with:
 
 ```bash
-TASK_WORK=/absolute/writable/task-directory
-mkdir -p "$TASK_WORK"
-cp /absolute/path/to/this-skill/scripts/build_asset_workbook.mjs "$TASK_WORK/build_asset_workbook.mjs"
-ln -s /workspace/dependencies/node/node_modules "$TASK_WORK/node_modules"
-/workspace/dependencies/node/bin/node "$TASK_WORK/build_asset_workbook.mjs" \
-  --input "$TASK_WORK/assets.json" \
-  --output "/absolute/output/《剧本名》_AI资产统计表.xlsx" \
-  --preview-dir "$TASK_WORK/previews"
+hermes skills install lynnhly1115-oss/lynnai-skills/ai-live-action-asset-breakdown --yes
 ```
 
-Use the exact runtime paths returned by `load_workspace_dependencies`; do not use system Node or another spreadsheet library.
+Resolve the directory containing this `SKILL.md`. Use [scripts/build_asset_workbook.py](scripts/build_asset_workbook.py), which loads [scripts/dependency_bootstrap.py](scripts/dependency_bootstrap.py) and [scripts/requirements.txt](scripts/requirements.txt). On first run, missing packages are installed from PyPI into the user's LynnAI cache; the Hermes environment and system Python are not modified.
+
+Extract text when the source is a document:
+
+```bash
+python3 "<skill-dir>/scripts/build_asset_workbook.py" extract \
+  "/absolute/path/to/script.docx" \
+  --output "/absolute/work/script.txt"
+```
+
+After reviewing the complete script and preparing `assets.json`, build the workbook:
+
+```bash
+python3 "<skill-dir>/scripts/build_asset_workbook.py" build \
+  --input "/absolute/work/assets.json" \
+  --output "/absolute/output/《剧本名》_AI资产统计表.xlsx" \
+  --preview-dir "/absolute/work/previews"
+```
+
+Use `python3` on macOS/Linux or `python` on Windows. The build command performs a structural inspection and exits with code 2 if it finds a workbook error. The optional preview is a local HTML file for visual review and is not part of the final delivery.
 
 ## Quality Gate
 
@@ -111,5 +123,5 @@ Use the exact runtime paths returned by `load_workspace_dependencies`; do not us
 - No set dressing is misclassified as a prop.
 - Per-episode and cumulative formulas equal the listed asset rows.
 - The workbook contains one sheet only and uses the exact headers.
-- Inspect values and formulas, scan for formula errors, and visually review every rendered preview segment.
+- Inspect values and formulas, scan for formula-error tokens, and visually review the generated HTML preview when a browser is available.
 - Deliver only the final XLSX; do not deliver JSON, scripts, or previews.
