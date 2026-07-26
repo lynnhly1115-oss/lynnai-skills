@@ -1,6 +1,6 @@
 # LynnAI Skills
 
-Personal Codex skills for Chinese short-drama production workflows.
+Reusable Codex and Hermes skills for Chinese short-drama production workflows.
 
 This repository packages reusable `SKILL.md`-based agents and helper scripts
 that turn screenplay files into production-ready Excel workbooks. The current
@@ -9,6 +9,7 @@ art-department prep.
 
 ![Skills](https://img.shields.io/badge/skills-3-1f4e5f)
 ![Codex](https://img.shields.io/badge/Codex-skills-2b6cb0)
+![Hermes](https://img.shields.io/badge/Hermes-2%20native%20skills-7a2e2e)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -50,10 +51,27 @@ Or create an AI live-action asset inventory:
 Use $ai-live-action-asset-breakdown to read this complete script and create a deduplicated Excel asset inventory with image placeholders.
 ```
 
+## Hermes Agent
+
+The schedule-table and AI asset skills are self-contained for Hermes Agent.
+Install their complete bundles directly from GitHub:
+
+```bash
+hermes skills install lynnhly1115-oss/lynnai-skills/duanju-schedule-table --yes
+hermes skills install lynnhly1115-oss/lynnai-skills/ai-live-action-asset-breakdown --yes
+```
+
+Restart Hermes Desktop after installation. Missing Python packages are installed
+on first use into a separate LynnAI cache, without changing Hermes itself. See
+[HERMES.md](HERMES.md) for supported inputs, direct diagnostics, and boundaries.
+
+`screen-art-department-breakdown` remains available for Codex/manual agent use,
+but is not included in the Hermes compatibility guarantee.
+
 ## Other Agents
 
 These workflows are not limited to Codex. Any agent that can read files and run
-the required Python or Node.js helper can use the skills manually:
+the required Python helper can use the skills manually:
 
 - Read [AGENTS.md](AGENTS.md) for generic agent instructions.
 - Read [HERMES.md](HERMES.md) for a Hermes-ready prompt and command examples.
@@ -115,9 +133,9 @@ The workbook keeps one sheet named `资产统计表`, groups assets by episode a
 category, adds formula-driven subtotals and a cumulative total, and reserves
 three image cells for characters and props or six for scenes.
 
-Read the skill and its JSON schema before running the builder. The script uses
-Node.js and `@oai/artifact-tool`; in Codex, use the bundled workspace runtime
-returned by `load_workspace_dependencies`.
+Read the skill and its JSON schema before running the Python builder. The same
+builder runs in Codex and Hermes, performs a structural workbook inspection,
+and can create a local HTML preview for visual checking.
 
 ## Art Department Workbooks
 
@@ -170,12 +188,16 @@ lynnai-skills/
 │   ├── SKILL.md
 │   ├── agents/openai.yaml
 │   ├── references/inventory-schema.md
-│   └── scripts/build_asset_workbook.mjs
+│   ├── scripts/build_asset_workbook.py
+│   ├── scripts/dependency_bootstrap.py
+│   └── scripts/requirements.txt
 ├── duanju-schedule-table/
 │   ├── SKILL.md
 │   ├── agents/openai.yaml
 │   ├── references/review-config.md
 │   ├── scripts/shunchangbiao_builder.py
+│   ├── scripts/dependency_bootstrap.py
+│   ├── scripts/requirements.txt
 │   └── tests/test_shunchangbiao_builder.py
 ├── screen-art-department-breakdown/
 │   ├── SKILL.md

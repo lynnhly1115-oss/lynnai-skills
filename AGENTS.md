@@ -58,16 +58,11 @@ The helper scripts expect Python 3 with these packages available:
 - `openpyxl`
 - `pdfplumber` for text-based PDF input
 
-If the default Python is missing packages, use the host agent's bundled
-workspace Python or create a local virtual environment outside this repository.
-
-The AI live-action asset builder additionally requires:
-
-- Node.js
-- `@oai/artifact-tool`
-
-When running in Codex, use the bundled workspace dependency paths returned by
-`load_workspace_dependencies`.
+For `duanju-schedule-table` and `ai-live-action-asset-breakdown`, the bundled
+dependency bootstrap installs missing packages from PyPI into the user's LynnAI
+cache. It does not modify the host agent, Hermes, or system Python. The first
+run needs internet access. `screen-art-department-breakdown` still expects the
+host agent to provide the listed Python packages.
 
 ## Quality Rules
 
