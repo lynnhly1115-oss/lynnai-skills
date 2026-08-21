@@ -38,9 +38,9 @@ Use `screen-art-department-breakdown` when the user asks for:
 2. Read the relevant `SKILL.md` completely before touching files.
 3. Read any schema or review reference linked directly from `SKILL.md`.
 4. Use the helper script in that skill's `scripts/` directory.
-5. Generate a draft workbook and, when useful, a JSON scene or asset dump.
-6. Review the workbook against the required checks in `SKILL.md`.
-7. Return the final `.xlsx` path to the user.
+5. Generate draft workbook artifacts and, when useful, a JSON scene or asset dump.
+6. Review every generated artifact against the required checks in `SKILL.md`.
+7. Return all final output paths to the user.
 
 Example:
 
@@ -58,11 +58,10 @@ The helper scripts expect Python 3 with these packages available:
 - `openpyxl`
 - `pdfplumber` for text-based PDF input
 
-For `duanju-schedule-table` and `ai-live-action-asset-breakdown`, the bundled
-dependency bootstrap installs missing packages from PyPI into the user's LynnAI
-cache. It does not modify the host agent, Hermes, or system Python. The first
-run needs internet access. `screen-art-department-breakdown` still expects the
-host agent to provide the listed Python packages.
+Each skill's bundled dependency bootstrap installs missing packages from PyPI
+into the user's LynnAI cache. It does not modify the host agent, Hermes, or
+system Python. The first run needs internet access only when packages are
+missing.
 
 ## Quality Rules
 
@@ -71,6 +70,9 @@ host agent to provide the listed Python packages.
 - Check scene count, scene IDs, and scene order against the source script.
 - Include malformed headings, flashbacks, montage inserts, phone-screen inserts,
   and extra scenes instead of silently dropping them.
+- For art-department work, use one shared standardized location/prop data set
+  across all four output files and complete the automatic, semantic, and visual
+  validation stages in its `SKILL.md`.
 - Keep generated workbooks, JSON dumps, screenshots, and temporary files out of
   this repository unless they are intentional fixtures.
 - Keep schedule-table work and AI asset inventory work separate. Schedule
@@ -84,7 +86,7 @@ host agent to provide the listed Python packages.
 For every completed run, report:
 
 - source script name
-- generated workbook path
+- generated workbook or project-folder paths
 - scene count
 - any assumptions or source-number anomalies
 - whether validation checks passed

@@ -1,15 +1,15 @@
 # LynnAI Skills
 
-Reusable Codex and Hermes skills for Chinese short-drama production workflows.
+Reusable Codex and Hermes skills for film, television, and short-drama production workflows.
 
 This repository packages reusable `SKILL.md`-based agents and helper scripts
 that turn screenplay files into production-ready Excel workbooks. The current
-focus is short-drama scheduling, AI live-action asset inventories, and
-art-department prep.
+focus is short-drama scheduling, AI live-action asset inventories, and checked
+art-department prep for scripts of any genre or production format.
 
 ![Skills](https://img.shields.io/badge/skills-3-1f4e5f)
 ![Codex](https://img.shields.io/badge/Codex-skills-2b6cb0)
-![Hermes](https://img.shields.io/badge/Hermes-2%20native%20skills-7a2e2e)
+![Hermes](https://img.shields.io/badge/Hermes-3%20native%20skills-7a2e2e)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -19,7 +19,7 @@ art-department prep.
 | --- | --- | --- |
 | [`duanju-schedule-table`](duanju-schedule-table/SKILL.md) | One strictly checked `顺场表` Excel workbook per script | 短剧顺场表、拍摄顺序表、角色出场、日夜内外、群演、梳化服、道具提示 |
 | [`ai-live-action-asset-breakdown`](ai-live-action-asset-breakdown/SKILL.md) | One `资产统计表` workbook per project, with reserved image cells | AI真人剧资产统计、按集累计去重、人物/场景/戏用道具、资产变体 |
-| [`screen-art-department-breakdown`](screen-art-department-breakdown/SKILL.md) | A four-sheet art prep workbook: `顺场表`, `分场表`, `场景表`, `置景道具执行表` | 美术指导、场景拆解、置景道具、采买制作、特殊道具整理 |
+| [`screen-art-department-breakdown`](screen-art-department-breakdown/SKILL.md) | One checked folder with four separate workbooks: `顺场表`, `分场表`, `场景表`, `置景道具执行表` | 电影、电视剧、短剧的美术指导、场景拆解、置景道具、采买制作、特殊道具整理 |
 
 ## Quick Start
 
@@ -53,20 +53,18 @@ Use $ai-live-action-asset-breakdown to read this complete script and create a de
 
 ## Hermes Agent
 
-The schedule-table and AI asset skills are self-contained for Hermes Agent.
-Install their complete bundles directly from GitHub:
+All three skills are self-contained for Hermes Agent. Install their complete
+bundles directly from GitHub:
 
 ```bash
 hermes skills install lynnhly1115-oss/lynnai-skills/duanju-schedule-table --yes
 hermes skills install lynnhly1115-oss/lynnai-skills/ai-live-action-asset-breakdown --yes
+hermes skills install lynnhly1115-oss/lynnai-skills/screen-art-department-breakdown --yes
 ```
 
 Restart Hermes Desktop after installation. Missing Python packages are installed
 on first use into a separate LynnAI cache, without changing Hermes itself. See
 [HERMES.md](HERMES.md) for supported inputs, direct diagnostics, and boundaries.
-
-`screen-art-department-breakdown` remains available for Codex/manual agent use,
-but is not included in the Hermes compatibility guarantee.
 
 ## Other Agents
 
@@ -139,8 +137,10 @@ and can create a local HTML preview for visual checking.
 
 ## Art Department Workbooks
 
-`screen-art-department-breakdown` is for production prep beyond a basic
-schedule table. It creates four sheets:
+`screen-art-department-breakdown` is for art-department preparation across
+film, television, and short drama. It learns the current project's vocabulary
+instead of assuming a fixed genre, then creates four separate checked files in
+one folder:
 
 - `顺场表`: one scene per row in script order
 - `分场表`: scenes grouped by practical location
@@ -151,8 +151,16 @@ schedule table. It creates four sheets:
 Run the helper script directly:
 
 ```bash
-python3 screen-art-department-breakdown/scripts/art_department_breakdown.py script.docx --out-dir output
+python3 screen-art-department-breakdown/scripts/art_department_breakdown.py script.docx \
+  --out-dir output \
+  --folder-name "项目名-美术拆解" \
+  --dump-json work/art-scenes.json
 ```
+
+The helper rejects silent scene-heading drops, checks scene coverage and
+cross-file location/prop naming, reopens every workbook, and verifies the four
+fixed file/header contracts. The Skill also requires semantic review against
+the source and visual inspection of all four final workbooks.
 
 ## Supported Inputs
 
@@ -203,8 +211,12 @@ lynnai-skills/
 │   ├── SKILL.md
 │   ├── agents/
 │   │   └── openai.yaml
-│   └── scripts/
-│       └── art_department_breakdown.py
+│   ├── scripts/
+│   │   ├── art_department_breakdown.py
+│   │   ├── dependency_bootstrap.py
+│   │   └── requirements.txt
+│   └── tests/
+│       └── test_art_department_breakdown.py
 └── scripts/
     └── validate_skills.py
 ```

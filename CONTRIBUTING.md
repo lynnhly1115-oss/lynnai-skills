@@ -39,3 +39,9 @@ For the schedule-table parser, run its bundled unit tests:
 ```bash
 python3 -m unittest discover -s duanju-schedule-table/tests -v
 ```
+
+For the art-department parser, run its bundled unit tests:
+
+```bash
+python3 -m unittest discover -s screen-art-department-breakdown/tests -v
+```

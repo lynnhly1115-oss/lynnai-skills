@@ -1,10 +1,11 @@
 # Hermes Usage
 
-Two skills in this repository are packaged for a computer that has Hermes Agent
+Three skills in this repository are packaged for a computer that has Hermes Agent
 but does not have Codex:
 
 - `duanju-schedule-table`
 - `ai-live-action-asset-breakdown`
+- `screen-art-department-breakdown`
 
 ## Install
 
@@ -14,6 +15,7 @@ folder, including its scripts, references, and dependency manifest.
 ```bash
 hermes skills install lynnhly1115-oss/lynnai-skills/duanju-schedule-table --yes
 hermes skills install lynnhly1115-oss/lynnai-skills/ai-live-action-asset-breakdown --yes
+hermes skills install lynnhly1115-oss/lynnai-skills/screen-art-department-breakdown --yes
 ```
 
 Restart Hermes Desktop after installation. The skills can then trigger from a
@@ -27,13 +29,18 @@ Use $duanju-schedule-table to turn this complete short-drama script into a check
 Use $ai-live-action-asset-breakdown to read this complete script and create a deduplicated Excel asset inventory with image placeholders.
 ```
 
+```text
+Use $screen-art-department-breakdown to turn this complete film, TV, or short-drama script into a checked folder containing four separate art-department Excel files.
+```
+
 ## First Run
 
-Both skills use Python. If `python-docx`, `openpyxl`, or `pdfplumber` is missing,
+All three skills use Python. If `python-docx`, `openpyxl`, or `pdfplumber` is missing,
 the bundled launcher downloads the packages from PyPI into the user's LynnAI
 cache. It does not modify Hermes' own Python environment or the system Python.
-An internet connection is therefore required the first time either skill runs.
-The two skills share the same dependency cache when their requirements match.
+An internet connection is therefore required the first time a skill runs with
+missing packages. The skills share the same dependency cache when their
+requirements match.
 
 Supported source formats:
 
@@ -81,6 +88,20 @@ python3 "<skill-dir>/scripts/build_asset_workbook.py" build \
   --preview-dir work/previews
 ```
 
+Create a checked four-file art-department folder and an external scene dump:
+
+```bash
+python3 "<skill-dir>/scripts/art_department_breakdown.py" script.docx \
+  --out-dir output \
+  --folder-name "项目名-美术拆解" \
+  --dump-json work/art-scenes.json
+```
+
+The art-department helper validates the fixed four-file contract, scene
+coverage, and shared location/prop naming. Hermes must still complete the
+semantic source review and visually inspect all four final workbooks before
+delivery.
+
 The asset build performs a structural workbook inspection. The optional preview
 is a local HTML file for visual checking; only the final `.xlsx` is delivered.
 
@@ -91,5 +112,3 @@ is a local HTML file for visual checking; only the final `.xlsx` is delivered.
 - Do not silently drop malformed headings, missing day/night fields, variants,
   or scanned pages.
 - Keep generated files outside the installed skill directory.
-- `screen-art-department-breakdown` is not part of this Hermes compatibility
-  package and is not covered by these installation guarantees.
