@@ -150,12 +150,12 @@ class SceneSplitTests(unittest.TestCase):
         }
         self.config = {
             "roles": [{"name": "林晓", "mark": "晓"}], "scene_splits": {"1-1": self.plan},
-            "continuity_groups": [{"scenes": ["1-1a", "1-1b", "1-1c"], "reviewed": True,
+            "continuity_groups": [{"scenes": ["1-1#1", "1-1#2", "1-1#3"], "reviewed": True,
                                    "reason": "同在林宅，林晓拿信出院与保安交涉后立即返回读信"}],
             "scenes": {},
         }
-        for i, suffix in enumerate("abc"):
-            self.config["scenes"]["1-1" + suffix] = {
+        for i in range(3):
+            self.config["scenes"][f"1-1#{i + 1}"] = {
                 "reviewed": True, "summary": ["林晓拿起桌上信件准备到院子", "林晓在院子被保安拦住后交涉", "林晓返回客厅坐下仔细读信件"][i],
                 "main_location": "林宅", "body_line_count": [3, 4, 2][i], "hint": "",
                 "on_camera": ["林晓"], "special_actors": "保安" if i == 1 else "", "groups": "",
@@ -167,7 +167,8 @@ class SceneSplitTests(unittest.TestCase):
         original = deepcopy(self.source)
         scenes, issues = builder.apply_scene_splits([self.source], self.config)
         self.assertEqual(issues, [])
-        self.assertEqual([s["scene"] for s in scenes], ["1-1a", "1-1b", "1-1c"])
+        self.assertEqual([s["scene"] for s in scenes], ["1-1", "1-1a", "1-1"])
+        self.assertEqual([s["row_id"] for s in scenes], ["1-1#1", "1-1#2", "1-1#3"])
         self.assertEqual("".join(s["body_text"] for s in scenes), self.source["body_text"])
         self.assertEqual(self.source, original)
         self.assertEqual([s["location"] for s in scenes], ["林宅客厅", "林宅院子", "林宅客厅"])
@@ -209,7 +210,7 @@ class SceneSplitTests(unittest.TestCase):
         duplicate = dict(self.source, scene="1-1a")
         self.assertTrue(builder.apply_scene_splits([self.source, duplicate], self.config)[1])
         self.assertTrue(builder.apply_scene_splits([self.source, self.source], self.config)[1])
-        self.config["scenes"]["1-1"] = self.config["scenes"]["1-1a"]
+        self.config["scenes"]["1-1"] = self.config["scenes"]["1-1#1"]
         self.assertTrue(builder.apply_scene_splits([self.source], self.config)[1])
 
     def test_existing_suffix_is_preserved_and_not_automatically_split_again(self) -> None:
@@ -230,8 +231,8 @@ class SceneSplitTests(unittest.TestCase):
         scenes, _ = builder.apply_scene_splits([self.source], self.config)
         roles = builder.resolve_roles(scenes, self.config)
         self.assertEqual(builder.validation_issues(scenes, self.config, roles, strict=True), [])
-        del self.config["scenes"]["1-1b"]
-        self.assertTrue(any("1-1b：未完成逐场复核" in issue for issue in builder.validation_issues(scenes, self.config, roles, strict=True)))
+        del self.config["scenes"]["1-1#2"]
+        self.assertTrue(any("1-1#2：未完成逐场复核" in issue for issue in builder.validation_issues(scenes, self.config, roles, strict=True)))
         del self.config["scene_splits"]
         self.assertTrue(any("场内转场复核" in issue for issue in builder.validation_issues(scenes, self.config, roles, strict=True)))
 
@@ -242,11 +243,17 @@ class SceneSplitTests(unittest.TestCase):
             builder.build_workbook(Path("fixture.docx"), scenes, output, self.config)
             wb = load_workbook(output)
             schedule, locations = wb["顺场表"], wb["分场表"]
-            rows = {row[3]: row for row in schedule.iter_rows(min_row=2, values_only=True)}
-            self.assertEqual(rows, {row[3]: row for row in locations.iter_rows(min_row=2, values_only=True)})
-            self.assertEqual([row[3] for row in locations.iter_rows(min_row=2, values_only=True)], ["1-1a", "1-1c", "1-1b"])
-            self.assertEqual([rows["1-1" + s][8] for s in "abc"], [0.1, 0.2, 0.1])
-            self.assertEqual([rows["1-1" + s][10] for s in "abc"], [None, "保安", None])
+            rows = {row[0]: row for row in schedule.iter_rows(min_row=2, values_only=True)}
+            self.assertEqual(rows, {row[0]: row for row in locations.iter_rows(min_row=2, values_only=True)})
+            self.assertEqual([row[3] for row in locations.iter_rows(min_row=2, values_only=True)], ["1-1", "1-1", "1-1a"])
+            self.assertEqual([rows[i][8] for i in (1, 2, 3)], [0.1, 0.2, 0.1])
+            self.assertEqual([rows[i][10] for i in (1, 2, 3)], [None, "保安", None])
+            self.assertEqual(len(rows), 3)
+            self.assertNotEqual(rows[1][5], rows[3][5])
+            self.assertEqual([row[0] for row in locations.iter_rows(min_row=2, values_only=True)], [1, 3, 2])
+            self.assertIn("接1-1（顺场1）", rows[2][-1])
+            self.assertIn("续1-1（顺场3）", rows[2][-1])
+            self.assertNotIn("#", "".join(str(value) for row in rows.values() for value in row))
             for ws in wb:
                 self.assertEqual(ws["D2"].border.top.style, "thick")
                 self.assertEqual(ws["D4"].border.bottom.style, "thick")
@@ -255,7 +262,7 @@ class SceneSplitTests(unittest.TestCase):
             wb.close()
 
     def test_cross_main_location_split_does_not_qualify_for_one_continuity_box(self) -> None:
-        self.config["scenes"]["1-1b"]["main_location"] = "警局"
+        self.config["scenes"]["1-1#2"]["main_location"] = "警局"
         self.plan["parts"][1]["location"] = "警局门口"
         scenes, issues = builder.apply_scene_splits([self.source], self.config)
         self.assertEqual(issues, [])
@@ -282,7 +289,8 @@ class SceneSplitTests(unittest.TestCase):
             record = json.loads(report.read_text())[script.name]
             self.assertEqual(record["source_scene_count"], 1)
             self.assertEqual(record["scene_count"], 3)
-            self.assertEqual(record["split_map"], {"1-1": ["1-1a", "1-1b", "1-1c"]})
+            self.assertEqual(record["split_map"], {"1-1": ["1-1", "1-1a", "1-1"]})
+            self.assertEqual(record["split_row_ids"], {"1-1": ["1-1#1", "1-1#2", "1-1#3"]})
             self.assertTrue(record["delivery_allowed"])
             self.assertEqual("".join(s["body_text"] for s in json.loads(dump.read_text())[script.name]), self.source["body_text"])
             self.plan["source_body_sha256"] = "stale"
@@ -291,6 +299,65 @@ class SceneSplitTests(unittest.TestCase):
             result = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(result.returncode, 2)
             self.assertFalse(list((root / "invalid").glob("*.xlsx")))
+
+    def test_new_spaces_get_letters_and_each_return_reuses_its_number(self) -> None:
+        source = dict(self.source, scene="2-7", body_text="甲。乙。丙。丁。戊。")
+        places = ["林宅客厅", "林宅院子", "林宅客厅", "林宅厨房", "林宅院子"]
+        plan = dict(self.plan, source_body_sha256=builder.source_body_digest(source), parts=[
+            {"start": i * 2, "location": place, "day": "日", "inside_outside": "外" if place.endswith("院子") else "内"}
+            for i, place in enumerate(places)
+        ])
+        next_scene = dict(self.source, scene="2-8")
+        scenes, issues = builder.apply_scene_splits([source, next_scene], {"scene_splits": {"2-7": plan}})
+        self.assertEqual(issues, [])
+        self.assertEqual([s["scene"] for s in scenes], ["2-7", "2-7a", "2-7", "2-7b", "2-7a", "2-8"])
+        self.assertEqual(len({builder.scene_key(s) for s in scenes}), 6)
+
+    def test_aliases_require_reviewed_space_key_and_unknown_spaces_do_not_reuse(self) -> None:
+        self.plan["parts"][2]["location"] = "林家客厅"
+        self.plan["parts"][0]["space_key"] = "林宅客厅"
+        self.plan["parts"][2]["space_key"] = "林宅客厅"
+        scenes, issues = builder.apply_scene_splits([self.source], self.config)
+        self.assertEqual(issues, [])
+        self.assertEqual([s["scene"] for s in scenes], ["1-1", "1-1a", "1-1"])
+        self.plan["parts"][2]["space_key"] = "王宅客厅"
+        scenes, _ = builder.apply_scene_splits([self.source], self.config)
+        self.assertEqual([s["scene"] for s in scenes], ["1-1", "1-1a", "1-1b"])
+        for part in self.plan["parts"]:
+            part["space_key"] = "需确认"
+        scenes, _ = builder.apply_scene_splits([self.source], self.config)
+        self.assertEqual([s["scene"] for s in scenes], ["1-1", "1-1a", "1-1b"])
+        self.plan["parts"][1]["space_key"] = []
+        self.assertTrue(builder.apply_scene_splits([self.source], self.config)[1])
+
+    def test_continuity_targets_exact_occurrence_after_location_sort(self) -> None:
+        self.config["continuity_groups"][0]["scenes"] = ["1-1#1", "1-1#2"]
+        scenes, _ = builder.apply_scene_splits([self.source], self.config)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "split.xlsx"
+            builder.build_workbook(Path("fixture.docx"), scenes, output, self.config)
+            wb = load_workbook(output)
+            self.assertEqual(wb["顺场表"]["D4"].border.left.style, "thin")
+            self.assertEqual(wb["分场表"]["D3"].border.left.style, "thin")
+            for cell in (wb["分场表"]["D2"], wb["分场表"]["D4"]):
+                self.assertEqual(cell.border.top.style, "thick")
+                self.assertEqual(cell.border.bottom.style, "thick")
+            wb.close()
+
+    def test_unreviewed_duplicate_labels_and_duplicate_internal_keys_still_fail(self) -> None:
+        issues = builder.validation_issues([self.source, dict(self.source)], {}, [], strict=False)
+        self.assertTrue(any("重复" in issue for issue in issues))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "invalid.xlsx"
+            with self.assertRaisesRegex(ValueError, "唯一行标识"):
+                builder.build_workbook(Path("fixture.docx"), [self.source, dict(self.source)], output, {})
+            self.assertFalse(output.exists())
+        scenes, _ = builder.apply_scene_splits([self.source], self.config)
+        scenes[2]["row_id"] = scenes[0]["row_id"]
+        self.assertTrue(any("标识重复" in issue for issue in builder.validation_issues(scenes, self.config, [], strict=False)))
+        scenes[2]["row_id"] = "1-1#3"
+        scenes[2]["split_space_key"] = ["王宅客厅", "内"]
+        self.assertTrue(any("不属于" in issue for issue in builder.validation_issues(scenes, self.config, [], strict=False)))
 
 
 class PeopleAndDepartmentTests(unittest.TestCase):

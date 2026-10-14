@@ -958,11 +958,16 @@ def cast_names(value: str) -> list[str]:
     return ordered_unique(re.split(r"[、；;\n]+", value))
 
 
+def scene_key(scene: dict) -> str:
+    """Review/storage key, separate from the intentionally reusable scene label."""
+    return scene.get("row_id", scene["scene"])
+
+
 def reviewed_special_names(scenes: list[dict], config: dict) -> set[str]:
     return {
         name
         for scene in scenes
-        for name in cast_names(scene_review(config, scene["scene"]).get("special_actors", ""))
+        for name in cast_names(scene_review(config, scene_key(scene)).get("special_actors", ""))
     }
 
 
@@ -983,7 +988,7 @@ def resolve_continuity_groups(scenes: list[dict], config: dict) -> tuple[list[li
     raw_groups = config.get("continuity_groups", [])
     if not isinstance(raw_groups, list):
         return [], ["连场分组continuity_groups须为列表，无连场时填空列表"]
-    positions = {scene["scene"]: index for index, scene in enumerate(scenes)}
+    positions = {scene_key(scene): index for index, scene in enumerate(scenes)}
     groups = []
     issues = []
     assigned = set()
@@ -1028,22 +1033,27 @@ def resolve_continuity_groups(scenes: list[dict], config: dict) -> tuple[list[li
     return ([] if issues else groups), issues
 
 
-def continuity_notes(groups: list[list[str]]) -> dict[str, str]:
+def continuity_notes(groups: list[list[str]], scenes: list[dict]) -> dict[str, str]:
     """Keep the same source-order links in both worksheet views."""
+    labels = [scene["scene"] for scene in scenes]
+    references = {
+        scene_key(scene): scene["scene"] + (f"（顺场{index + 1}）" if labels.count(scene["scene"]) > 1 else "")
+        for index, scene in enumerate(scenes)
+    }
     notes = {}
     for number, members in enumerate(groups, start=1):
         for index, member in enumerate(members):
             parts = [f"连场{number}"]
             if index:
-                parts.append(f"接{members[index - 1]}")
+                parts.append(f"接{references[members[index - 1]]}")
             if index + 1 < len(members):
-                parts.append(f"续{members[index + 1]}")
+                parts.append(f"续{references[members[index + 1]]}")
             notes[member] = "；".join(parts)
     return notes
 
 
 def apply_continuity_borders(ws, scenes: list[dict], groups: list[list[str]]) -> None:
-    rows = {scene["scene"]: index + 2 for index, scene in enumerate(scenes)}
+    rows = {scene_key(scene): index + 2 for index, scene in enumerate(scenes)}
     scene_column = next(cell.column for cell in ws[1] if cell.value == "场次")
     thick = Side(style="thick", color="FF000000")
     for members in groups:
@@ -1067,7 +1077,7 @@ def pages_from_body_lines(line_count: int | None) -> float | str:
 
 
 def location_key(scene: dict, config: dict) -> tuple[str, str, str]:
-    review = scene_review(config, scene["scene"])
+    review = scene_review(config, scene_key(scene))
     specific = review.get("location_group") or scene.get("location", "")
     specific = specific.strip() if isinstance(specific, str) else ""
     main = review.get("main_location")
@@ -1076,9 +1086,9 @@ def location_key(scene: dict, config: dict) -> tuple[str, str, str]:
     if not main:
         main = specific
     if not main or any(word in main for word in ("需确认", "待确认")):
-        main = f"未确认主场景:{scene['scene']}"
+        main = f"未确认主场景:{scene_key(scene)}"
     if not specific or any(word in specific for word in ("需确认", "待确认")):
-        specific = f"未确认子场景:{scene['scene']}"
+        specific = f"未确认子场景:{scene_key(scene)}"
     return main, specific, scene.get("inside_outside", "需确认")
 
 
@@ -1124,6 +1134,7 @@ def apply_scene_splits(scenes: list[dict], config: dict) -> tuple[list[dict], li
     issues = [f"拆场原场号不存在：{key}" for key in plans if key not in source_ids]
     replacements = {}
     allocated = set(source_ids)
+    row_keys = {scene_key(scene) for scene in originals}
     for source in originals:
         parent = source["scene"]
         if parent not in plans:
@@ -1154,10 +1165,10 @@ def apply_scene_splits(scenes: list[dict], config: dict) -> tuple[list[dict], li
         starts = []
         children = []
         for index, part in enumerate(parts):
-            child_id = parent + split_suffix(index)
-            if child_id in allocated:
-                issues.append(f"{label}：子场号{child_id}与已有场号冲突")
-            allocated.add(child_id)
+            child_id = f"{parent}#{index + 1}"
+            if child_id in row_keys:
+                issues.append(f"{label}：片段标识{child_id}与已有记录冲突")
+            row_keys.add(child_id)
             children.append(child_id)
             if not isinstance(part, dict):
                 issues.append(f"{child_id}：子场记录须为对象")
@@ -1168,6 +1179,8 @@ def apply_scene_splits(scenes: list[dict], config: dict) -> tuple[list[dict], li
                 issues.append(f"{child_id}：start须为正文内有效的零起始字符位置")
             if not isinstance(part.get("location"), str) or not part["location"].strip():
                 issues.append(f"{child_id}：须填写经正文复核的具体场景location")
+            if "space_key" in part and (not isinstance(part["space_key"], str) or not part["space_key"].strip()):
+                issues.append(f"{child_id}：space_key须为经正文核实的具体空间统一名称")
             if part.get("day") not in ("日", "夜", "需确认"):
                 issues.append(f"{child_id}：day须为日、夜或需确认")
             if part.get("inside_outside") not in ("内", "外", "内外", "需确认"):
@@ -1182,13 +1195,27 @@ def apply_scene_splits(scenes: list[dict], config: dict) -> tuple[list[dict], li
             issues.append(f"{label}：不能拆出只有空白的子场")
             continue
         replacements[parent] = []
+        space_numbers = {}
         for index, (part, child_id, start, end) in enumerate(zip(parts, children, starts, ends)):
             body = text[start:end]
+            space_name = part.get("space_key", part["location"]).strip()
+            if any(word in space_name for word in ("需确认", "待确认")):
+                space_name = f"未确认空间#{index + 1}"
+            space = (space_name, part["inside_outside"])
+            if space not in space_numbers:
+                scene_number = parent if not space_numbers else parent + split_suffix(len(space_numbers) - 1)
+                if scene_number != parent and scene_number in allocated:
+                    issues.append(f"{label}：新增地点场号{scene_number}与已有场号冲突")
+                allocated.add(scene_number)
+                space_numbers[space] = scene_number
+            scene_number = space_numbers[space]
             # Reconstruct production fields per child, never clone the mother's
             # entire cast, props, timing, page count or flashback annotations.
             child = {key: source[key] for key in ("source", "idx", "source_num") if key in source}
             child.update({
-                "scene": child_id,
+                "scene": scene_number,
+                "row_id": child_id,
+                "split_space_key": list(space),
                 "source_scene": parent,
                 "source_heading": source.get("heading", ""),
                 "source_body_sha256": source["source_body_sha256"],
@@ -1197,7 +1224,7 @@ def apply_scene_splits(scenes: list[dict], config: dict) -> tuple[list[dict], li
                 "split_reason": plan["reason"].strip(),
                 "split_part": index + 1,
                 "split_total": len(parts),
-                "heading": f"{child_id} {part['location'].strip()} {part['day']} {part['inside_outside']}",
+                "heading": f"{scene_number} {part['location'].strip()} {part['day']} {part['inside_outside']}",
                 "location": part["location"].strip(),
                 "day": part["day"],
                 "inside_outside": part["inside_outside"],
@@ -1223,12 +1250,20 @@ def validation_issues(
     strict: bool,
 ) -> list[str]:
     issues = []
-    scene_ids = [scene["scene"] for scene in scenes]
+    scene_ids = [scene_key(scene) for scene in scenes]
     duplicates = ordered_unique(scene_id for scene_id in scene_ids if scene_ids.count(scene_id) > 1)
     if not scenes:
         issues.append("未识别到任何场次")
     if duplicates:
-        issues.append(f"场号重复：{'、'.join(duplicates)}")
+        issues.append(f"场号/片段标识重复：{'、'.join(duplicates)}")
+    for label in ordered_unique(scene["scene"] for scene in scenes):
+        members = [scene for scene in scenes if scene["scene"] == label]
+        if len(members) > 1 and not (
+            all(scene.get("row_id") and "split_part" in scene and "split_space_key" in scene for scene in members)
+            and len({scene.get("source_scene") for scene in members}) == 1
+            and len({json.dumps(scene.get("split_space_key"), ensure_ascii=False) for scene in members}) == 1
+        ):
+            issues.append(f"场号{label}重复且不属于同一原场内同一空间的复返片段")
 
     names = [name for name, _ in roles]
     duplicate_names = ordered_unique(name for name in names if names.count(name) > 1)
@@ -1269,7 +1304,7 @@ def validation_issues(
         issues.append(f"特约演员与独立角色列重复：{'、'.join(overlapping_roles)}")
 
     for scene in scenes:
-        scene_id = scene["scene"]
+        scene_id = scene_key(scene)
         review = scene_review(config, scene_id)
         if review.get("reviewed") is not True:
             issues.append(f"{scene_id}：未完成逐场复核")
@@ -1327,9 +1362,11 @@ def validation_issues(
 
 
 def build_workbook(source: Path, scenes: list[dict], output: Path, config: dict) -> None:
+    if len({scene_key(scene) for scene in scenes}) != len(scenes):
+        raise ValueError("每个剧情片段须有唯一行标识，不能按重复显示场号覆盖记录")
     roles = resolve_roles(scenes, config)
     continuity_groups, _ = resolve_continuity_groups(scenes, config)
-    linked_notes = continuity_notes(continuity_groups)
+    linked_notes = continuity_notes(continuity_groups, scenes)
 
     wb = Workbook()
     wb.active.title = "顺场表"
@@ -1340,7 +1377,7 @@ def build_workbook(source: Path, scenes: list[dict], output: Path, config: dict)
     rows_by_scene = {}
     role_names = {role for role, _ in roles}
     for order, scene in enumerate(scenes, start=1):
-        review = scene_review(config, scene["scene"])
+        review = scene_review(config, scene_key(scene))
         visible = review.get("on_camera", scene["people"])
         people = set(visible) if isinstance(visible, list) else set()
         voices = collect_voices(scene)
@@ -1369,16 +1406,16 @@ def build_workbook(source: Path, scenes: list[dict], output: Path, config: dict)
                 reviewed_or_default(review, "notes", collect_notes(scene)),
                 (f"原场{scene['source_scene']}场内拆分（{scene['split_part']}/{scene['split_total']}）"
                  if "split_part" in scene else ""),
-                linked_notes.get(scene["scene"], ""),
+                linked_notes.get(scene_key(scene), ""),
             ])),
         ]
-        rows_by_scene[scene["scene"]] = row
+        rows_by_scene[scene_key(scene)] = row
 
     views = [(wb.active, scenes), (wb.create_sheet("分场表"), location_ordered_scenes(scenes, config))]
     for ws, ordered in views:
         ws.append(headers)
         for scene in ordered:
-            ws.append(rows_by_scene[scene["scene"]])
+            ws.append(rows_by_scene[scene_key(scene)])
         style_sheet(ws, len(headers), len(scenes), len(roles))
         apply_continuity_borders(ws, ordered, continuity_groups)
         for row, scene in enumerate(ordered, start=2):
@@ -1507,6 +1544,8 @@ def main() -> None:
             "scene_count": len(scenes),
             "split_map": {parent: [scene["scene"] for scene in scenes if scene.get("source_scene") == parent]
                           for parent in ordered_unique(scene["source_scene"] for scene in scenes if "source_scene" in scene)},
+            "split_row_ids": {parent: [scene_key(scene) for scene in scenes if scene.get("source_scene") == parent]
+                              for parent in ordered_unique(scene["source_scene"] for scene in scenes if "source_scene" in scene)},
             "sheets": ["顺场表", "分场表"],
             "issues": issues,
             "strict": args.strict,

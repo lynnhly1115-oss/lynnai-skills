@@ -66,8 +66,8 @@ Use a JSON config to replace automatic draft fields after reading every complete
 
 Rules:
 
-- Include every scene under `scenes` for a `--strict` build.
-- Review actual internal location changes before per-scene fields. Explicitly supply top-level `scene_splits` (`{}` after confirming none). For split sources, put only child IDs under `scenes`; each child requires the full reviewed fields. The CLI applies splits before role resolution, validation and both worksheet views.
+- Include every row under `scenes` for a `--strict` build: unsplit rows use their source scene number; split segments use the unique `row_id` described below.
+- Review actual internal location changes before per-scene fields. Explicitly supply top-level `scene_splits` (`{}` after confirming none). For split sources, put only segment row IDs under `scenes`; each requires the full reviewed fields. The CLI applies splits before role resolution, validation and both worksheet views. Display numbers can repeat and must never be used to deduplicate or overwrite segments.
 - Set `reviewed` to `true` only after comparing the scene fields with the source body.
 - Keep `summary` at 12-18 Chinese characters for normal scenes and 4-18 for empty shots, montage, inserts, phone screens, and transitions.
 - Explicitly provide `roles` after reviewing the complete script: by default include all named plot characters and list childhood versions separately, without asking the user to choose or approve the roster. An explicitly user-supplied scope overrides this default. `[]` is valid when no individual columns apply. Other unnamed individual roles belong in `special_actors`; raw inferred labels still require source review to separate names, aliases, occupation labels and crowds.
@@ -86,7 +86,7 @@ Rules:
 - Role names and single-character marks must both be unique. Follow the ordered cast decision table in `SKILL.md`: named identities first, other individually speaking/interacting roles second, background crowds last. Even one line or one scene can be special; repeated silent appearances do not demote that same identity to a crowd. Childhood/adult versions stay separate, verified aliases are unified, and voice-only or photo-only mentions do not create on-camera marks.
 - Explicitly include `continuity_groups` after reviewing both main-location identity and plot/time/action continuity. Both are required. `[]` means no confirmed groups; omitting it fails `--strict`. Do not bulk-fill `[]` without checking the scenes.
 - Every scene must supply a nonempty string `main_location` in its per-scene reviewed config, such as `沈宅`, for the default 分场表. If unknown, use `需确认` and explain why with `主场景需确认` in notes; those scenes stay separate and cannot enter confirmed continuity groups. This is source-reviewed metadata, not a new Excel column. All members of a continuity group must have the same confirmed value; differences in rooms or attached doorways are allowed only when the source establishes the same main location. A shared city district or shooting venue alone is insufficient. A location change breaks the group; a resulting singleton is not a new group.
-- Each group must have `reviewed: true`, a source-backed `reason` covering shared main location and continuous plot, and at least two distinct existing scene IDs in script order. Groups must not overlap. The script checks member main-location equality and group structure; it cannot infer the plot or verify the accuracy of reviewed labels.
+- Each group must have `reviewed: true`, a source-backed `reason` covering shared main location and continuous plot, and at least two distinct existing row IDs in script order. Groups must not overlap. The script checks member main-location equality and group structure; it cannot infer the plot or verify the accuracy of reviewed labels.
 - Uncertain links belong in the relevant scene's `notes` as `连场关系需确认`, not in a confirmed group. Clothing continuity alone is not a group reason.
 - For multiple input scripts, wrap each config under the exact source filename:
 
@@ -101,7 +101,8 @@ Rules:
 
 The agent must read every body and actively identify actual filming-space changes,
 even when the source provides only one scene heading. Camera changes or dialogue
-mentions of other places are not location transitions. A→B→A produces three rows.
+mentions of other places are not location transitions. A→B→A produces three rows
+displaying `1-1`, `1-1a`, `1-1`, not a/b/c by occurrence.
 Do not ask the user to list the transitions or manually assign suffixes.
 
 The draft `--dump-json` includes each original scene's exact `body_text` and
@@ -138,36 +139,58 @@ config["scene_splits"] = {
   `day` (`日`, `夜`, `需确认`) and `inside_outside` (`内`, `外`, `内外`, `需确认`).
   Review these per part; do not blindly inherit the mother's time or interior/exterior.
   Keep source-backed specific place names. Unknown metadata needs notes in the child review.
-- IDs are assigned automatically in source order: `1-1a`, `1-1b`, `1-1c`; after z
-  suffixes continue aa, ab. No extra `1-1` row remains and the next original `1-2`
-  is unchanged. Source IDs already carrying suffixes are preserved without a split
+- Display `scene` numbers are assigned per distinct filming space **within each
+  original source scene**. The first space keeps `1-1`; the second gets `1-1a`, the
+  third `1-1b`, and so on (after z use aa, ab). A return reuses that space's number.
+  A→B→A→C→B displays `1-1`, `1-1a`, `1-1`, `1-1b`, `1-1a` on five separate rows.
+  The first `1-1` row contains only the first segment, not an extra whole-parent row.
+  The next original `1-2` is unchanged. Source IDs already carrying suffixes are preserved without a split
   plan; nested splits require resolving source numbering first, not appending letters.
-  Collisions with existing IDs, stale hashes, missing parents and invalid boundaries
+  Collisions with another original scene's number, stale hashes, missing parents and invalid boundaries
   block the build, including draft builds; no partially split workbook is written.
+- Space identity defaults to exact `(location, inside_outside)`, not fuzzy matching.
+  Optional nonempty `space_key` on a part supplies the source-reviewed canonical
+  specific place for aliases; pair it with `inside_outside`. Use distinct keys for
+  different houses' same-named rooms. Unknown spaces stay separate. Day/night alone
+  does not allocate another space number. Keep the per-row review's `location_group`
+  consistent with confirmed aliases when grouping the location worksheet.
+- Each segment has a separate internal `row_id`: `1-1#1`, `1-1#2`, `1-1#3` in this
+  example. Store its full review under that key in `scenes` and reference that key
+  in `continuity_groups[].scenes`. These IDs are not Excel columns or display scene
+  numbers. Unsplit records keep their original scene number as the config key.
+  Never key dictionaries, worksheet comparisons or deduplication by display `scene`.
 - Repeated phrases require checking the intended occurrence. Never guess a start
   from a keyword or use an old offset after source edits. Reparse and re-review if
   the hash changed. Full text coverage checks cannot prove the semantic cut is correct.
-- Replace the mother's entry in `scenes` with a complete review for **each** child
-  (`1-1a`, `1-1b`, `1-1c` here). This also supplies child `main_location` and optional
+- Replace the mother's entry in `scenes` with a complete review for **each** segment
+  (`1-1#1`, `1-1#2`, `1-1#3` here). This also supplies child `main_location` and optional
   `location_group`. Child cast, department fields and `body_line_count` are independently
   reviewed; the helper does not inherit the mother's roster or page count.
 - A character slice is not a layout line count. Review each child's original-layout
   lines; do not count one shared boundary line twice. When attribution is unreliable,
   use `null` and explain `页数需确认`. Independent ceiling rounding can change the sum
   of page units compared with computing the unsplit mother once.
-- `continuity_groups` uses final child IDs. Split siblings are not automatically
+- `continuity_groups` uses unique row IDs, never ambiguous repeated display numbers.
+  In this example a fully confirmed group would use `["1-1#1", "1-1#2", "1-1#3"]`.
+  The helper displays human-readable references such as `接1-1（顺场1）` and
+  `续1-1（顺场3）` when needed; no internal `#` identifiers appear in worksheet data.
+  Split siblings are not automatically
   continuous: check same main location and continuing plot separately. The source
   body order remains unchanged; only 分场表 groups locations afterward.
-- Final dumps retain child `source_scene`, `source_heading`, character interval,
+- Final dumps retain each segment's unique `row_id`, display `scene`, reviewed
+  `split_space_key`, `source_scene`, `source_heading`, character interval,
   source-body hash, split ordinal/total and reason. Notes and scene-cell comments
   retain provenance in both worksheets without adding columns. Reports expose
-  `source_scene_count`, final `scene_count` and `split_map` for coverage reconciliation.
+  `source_scene_count`, final row `scene_count`, `split_map` (ordered display numbers,
+  including repeats), and `split_row_ids` for coverage reconciliation.
 - For direct Python use, call `apply_scene_splits(source_scenes, config)` first,
   stop on any returned issues, and pass the resulting children to `validation_issues`
   and `build_workbook`. These lower-level functions expect already expanded data.
 
-Existing configs now need `scene_splits` after a source review. Do not bulk-add an
-empty object merely to pass strict mode; review actual internal transitions first.
+Existing configs need `scene_splits` after a source review. Migrate previous a/b/c
+by-occurrence review keys and continuity members to per-segment row IDs after checking
+their source ranges; the helper rejects stale keys rather than reusing another
+segment's fields. Do not bulk-add an empty object merely to pass strict mode.
 
 ## Location-grouped worksheet
 
@@ -220,4 +243,4 @@ The example shows only continuity fields; merge each `main_location` into the co
 
 The first group gets one outer box over its three adjacent scene-number cells. The second gets a one-cell box for `2-1` and one two-cell box for `2-3`/`2-4`; `2-2` is untouched. All members of both groups receive a common group label and preceding/following member references in the notes of both worksheets. 顺场表 retains source order; 分场表 redraws those groups after location sorting. No cells are merged and no extra worksheet column is added.
 
-Group membership is keyed by final scene IDs, including reviewed split suffixes such as `1-13a`. `scene_splits` creates the child rows before this separate continuity-marking step.
+Group membership is keyed by unique row IDs: original scene numbers for unsplit rows and IDs such as `1-13#2` for split segments. Display numbers may repeat on return visits. `scene_splits` creates the rows before this separate continuity-marking step.

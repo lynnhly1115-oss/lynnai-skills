@@ -108,7 +108,7 @@ notes.
 
 ### 默认制作规则
 
-- **场内转场拆分**：读完整正文，原场内实际转到另一个具体拍摄空间，按顺序拆成 `1-1a、1-1b、1-1c`；客厅→院子→客厅保留三段。换机位或台词提及异地不拆。各子场分别核演员、道具、页数，再生成两张表；拆场与连场加框分别判断。
+- **场内转场拆分**：读完整正文，原场内实际转到另一个具体拍摄空间，第一地点保留原场号，新地点依次加a/b/c，返回已出现地点复用其场号；客厅→院子→客厅为 `1-1、1-1a、1-1`，保留三行，分别记录剧情和各项需求。换机位或台词提及异地不拆。各子场分别核演员、道具、页数，再生成两张表；拆场与连场加框分别判断。
 - **演员自动分列**：先核对全剧人物身份，有姓名或明确固定昵称的剧情角色各占一列，童年另列，同一身份的别名统一；不询问演员范围。独立列是表格分列方式，不表示演员级别。用户主动指定名单时按用户要求执行。
 - **特约与群演**：其余独立小角色，只出现一场、只说一句话，或无台词但有单独对手戏，都归特约。没有个人台词也没有单独对手戏的背景人群归群演。同一人物全剧分类保持一致，仅声音或照片不勾选现场出镜。
 - **默认两张表**：顺场表完成后，从同一数据生成分场表，相同主场景及具体空间归在一起，组内保留原顺序。两表内容一致，只改变排列；保留原场号、顺场序号和已核定连场关系。
@@ -121,7 +121,9 @@ Upgrading an existing reviewed config: add `body_line_count`, `hint`,
 `on_camera`, `special_actors`, `vo`, `os`, and `vehicles` to every scene after
 source review; explicitly fill `roles`, `scene_splits` and `continuity_groups`.
 Use `scene_splits: {}` only after reviewing that no internal location changes need
-splitting; otherwise provide reviewed body boundaries and full child-scene reviews.
+splitting; otherwise provide reviewed body boundaries and full segment reviews keyed by unique internal row IDs. Display scene numbers may
+repeat for returns to the same space; never merge those rows or key data by display
+number alone.
 Every scene now
 needs a reviewed `main_location`; optional `location_group` reconciles confirmed
 aliases for the same specific space. Continuity groups still require one shared
