@@ -102,10 +102,15 @@ Turn a complete screenplay into two production-facing views of one reviewed data
 
 ### 拍摄内容
 
-- Write the main action or event as `who + does what / what happens`.
-- Keep normal scenes at 12-18 Chinese characters.
-- Allow 4-18 characters for empty shots, montage, inserts, phone screens, and transitions when a shorter production description is clearer.
-- Do not use the first line of dialogue, an environment-only description, or a mechanical source-text truncation as the final summary.
+- **先通读本行对应的完整正文，再概括“这段戏发生了什么”。** 以“谁＋核心动作/谈话内容”为基础，正文明确的关键发现、回应或结果可写入同一句；没有结果时不强行补结果。不能只读人物名单、场次标题、第一句台词或正文开头。
+- **对白戏必须有具体内容。** 写清谈什么、质问什么、交代什么信息或争执焦点，不能止于“某人与某人交谈”“向某人陈述”“低声对话”。人物的说法、猜测、否认和未得到回答的问题，要保留归属与不确定性；“甲称乙拿走账本”不能改成“乙偷走账本”。
+- 若完整原文只写交谈而没有提供谈话内容，如实写“二人低声交谈，内容未交代”，备注说明“原文未提供具体对白，谈话内容需确认”；不能为了补主题而编造。原文明示声音不可闻时，可概括实际可见动作和不可闻状态；不能把“没写对白”自行理解为“听不清”。
+- **动作戏写实际发生的核心动作或事件。** “翻旧信”“整理笔记”若伴随关键发现，应概括发现；若正文只有翻看、整理、等待、握手等动作，就如实写，不能凭动作补出“发现线索”“等待抢救”“安慰对方”等动机、结果。
+- 用一句通顺、具体的短句，通常参考 **12—18字**。简单动作可更短，必要的主体、谈话内容或关键结果可适度超过18字；**内容准确完整优先，不按字数硬截、不用地点或时间凑字**。没有另设统一硬性上下限。
+- 不机械拼入“医院日内”等场地、日夜、内外表头信息；这些已有独立列。地点是动作目标、追逐去向、对话主题或空镜主体时可保留，如“林晓追至院门质问门卫”。普通戏不以环境描写替代主要事件；空镜、组接或插入画面按实际画面主体和变化概括，无需编造人物行动。
+- 拆场后的每个片段独立概括；`1-1→1-1a→1-1` 三行只写各自那段发生的事。同场号重复不意味着复制摘要，不能把前段铺垫、后段结果或整场概要套给每一行。顺场表与分场表共用同一条已复核摘要。
+- 写完逐项核对：①能否看出核心动作/事件或谈话内容；②人名、动作对象、否定、说法归属和关键结果是否与本段一致；③是否漏掉本段主事件而只写陪衬动作；④是否混入别段内容、添加动机/结果或靠表头信息凑字。详细示例见 [拍摄内容写作与验收](references/summary-writing.md)，生成正式摘要前阅读。
+- 正文缺失、截断或无法辨认时，草稿写“待复核：……”并说明原因，继续完成可核实部分；不能编造一个像完成品的摘要，也不能把未复核表交付成正式版。程序初稿统一显示待复核提示，不再截取开头文字充当摘要；正式构建拒绝占位及若干明显空泛的对话模板。程序通过不代表语义正确，仍须由制表AI通读正文复核；无需为此让用户逐场确认。
 
 ### 独立角色列、特约演员与群演
 
@@ -210,7 +215,7 @@ The automatic fields are drafts. Final delivery requires complete source review 
 - Every scene is marked reviewed in strict mode.
 - Every scene explicitly records a reviewed `body_line_count`; numeric pages follow the ceiling rule and display one decimal. Unknown counts display `需确认` with a reason and `页数需确认` in notes. Verify source-layout body lines rather than Word paragraphs or physical page counts.
 - Every reviewed scene explicitly contains `hint`, including an empty string when no tag applies. Tags reflect actual scene/production requirements; `AI做` has an explicit production basis and specific partial-scene scope is preserved in notes.
-- Every `拍摄内容` is meaningful and within the applicable length rule.
+- Every `拍摄内容` describes this exact segment's concrete main action/event or dialogue content, preserves attribution and uncertainty, and has been checked against the complete body. No placeholders, bare talk templates, invented outcomes, copied parent summaries or mechanical truncation. 12–18 characters is a writing target, not an acceptance test.
 - Missing day/night or inside/outside is explicitly marked `需确认`.
 - The full named-character roster and separate childhood roles are completed from the source without asking the user to approve an actor scope, unless the user has explicitly supplied a different roster. Special actors, crowds, and voice-only appearances are classified from dialogue and action without scene-count thresholds.
 - Every reviewed scene explicitly contains `special_actors`; the final sheet contains exactly one horizontal `特约演员` column before `群演`. Cast identities are not duplicated across categories.

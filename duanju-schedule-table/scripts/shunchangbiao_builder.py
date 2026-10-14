@@ -754,21 +754,64 @@ def default_mark(role: str) -> str:
 
 
 def short_summary(scene: dict) -> str:
-    fragments = []
-    for line in scene["body"]:
-        line = re.sub(r"^△", "", line).strip()
-        line = re.sub(r"【[^】]*】", "", line)
-        line = re.sub(r"[（(].*?[）)]", "", line)
-        line = re.sub(r"^\w+[:：；;]", "", line).strip()
-        line = re.sub(r"[，。！？、\s]+", "", line)
-        if line:
-            fragments.append(line)
-        candidate = "".join(fragments)
-        if len(candidate) >= 12:
-            return candidate[:18]
-    if fragments:
-        return "".join(fragments)[:18]
-    return "本场拍摄内容需要人工补写"
+    """Do not disguise a mechanical source excerpt as a reviewed synopsis."""
+    return "待复核：需通读本段正文概括"
+
+
+def summary_quality_issues(scene: dict, review: dict, roles: list[tuple[str, str]]) -> list[str]:
+    """Reject explicit placeholders and narrow, uninformative dialogue templates.
+
+    Passing these structural checks is not proof of source accuracy. Topics may
+    precede the dialogue verb, and quiet physical action can be the whole scene.
+    """
+    summary = review.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        return ["拍摄内容须为通读本段正文后写出的非空字符串"]
+    summary = summary.strip()
+    if summary.startswith(("待复核", "待补写", "待概括", "本场拍摄内容需要")):
+        return ["拍摄内容仍为待复核占位，不能作为正式概括"]
+    if not any(char.isalpha() for char in summary):
+        return ["拍摄内容缺少可读的事件或动作"]
+
+    def compact(text: str) -> str:
+        return "".join(char for char in text if not char.isspace() and not unicodedata.category(char).startswith("P"))
+
+    # Only strip known source/reviewed locations for template detection. Location
+    # words elsewhere can be meaningful action destinations and are not banned.
+    text = compact(summary)
+    places = sorted({compact(value) for value in (
+        scene.get("location", ""), review.get("main_location", ""), review.get("location_group", "")
+    ) if isinstance(value, str) and value.strip()}, key=len, reverse=True)
+    for place in places:
+        if text.startswith("在" + place):
+            text = text[len(place) + 1:]
+            break
+        if text.startswith(place):
+            text = text[len(place):]
+            break
+
+    names = {name for name, _ in roles}
+    names.update(name for name in scene.get("people", []) if isinstance(name, str))
+    names.update(cast_names(review.get("special_actors", "")))
+    if isinstance(review.get("on_camera"), list):
+        names.update(name for name in review["on_camera"] if isinstance(name, str))
+    names = {compact(name) for name in names if isinstance(name, str) and name.strip()}
+    if names:
+        text = re.sub("|".join(re.escape(name) for name in sorted(names, key=len, reverse=True)), "人", text)
+    people = r"(?:人|人物|某人|两人|二人|众人|他们|她们|姐妹俩|兄弟俩|妹妹|弟弟|姐姐|哥哥|父亲|母亲)"
+    findings = []
+    if re.match(rf"^(?:{DAY_RE})(?:{IO_RE})(?={people})", text):
+        findings.append("拍摄内容混入日夜/内外表头信息，请直接概括本段事件")
+    text = re.sub(rf"^(?:{DAY_RE})(?:{IO_RE})?(?={people})", "", text)
+    bare_talk = (
+        rf"^{people}(?:(?:与|和|向|对|跟|及|、)?{people})*"
+        r"(?:(?:低声|轻声|小声|悄悄|继续|再次|再|正在|进行)(?:地)?)*"
+        r"(?:交谈|对话|谈话|陈述|谈|聊天|沟通|商谈|争执|质问|询问|说明|叙述|讲述|讨论|谈论|交涉|聊)"
+        r"(?:中|着|起来|一番)?$"
+    )
+    if re.fullmatch(bare_talk, text):
+        findings.append("拍摄内容只写人物交谈/陈述等状态，须据正文写清谈话主题、争议或交代的信息")
+    return findings
 
 
 def collect_groups(scene: dict) -> str:
@@ -1345,15 +1388,7 @@ def validation_issues(
         group_overlap = sorted(set(cast_names(review.get("groups", ""))) & (special_names | main_names))
         if group_overlap:
             issues.append(f"{scene_id}：独立角色误入群演：{'、'.join(group_overlap)}")
-        summary = str(review.get("summary", "")).strip()
-        if not summary:
-            issues.append(f"{scene_id}：拍摄内容未填写")
-        else:
-            compact_length = len(re.sub(r"[\s，。！？；、,.;!?]", "", summary))
-            special_scene = bool(re.search(r"空镜|一组镜头|蒙太奇|手机屏幕|转场", scene.get("location", "") + scene.get("heading", "")))
-            minimum = 4 if special_scene else 12
-            if not minimum <= compact_length <= 18:
-                issues.append(f"{scene_id}：拍摄内容应为{minimum}-18个汉字")
+        issues.extend(f"{scene_id}：{issue}" for issue in summary_quality_issues(scene, review, roles))
         if scene.get("day") == "需确认" or scene.get("inside_outside") == "需确认":
             notes = str(reviewed_or_default(review, "notes", collect_notes(scene)))
             if "需确认" not in notes:

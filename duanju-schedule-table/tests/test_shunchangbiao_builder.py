@@ -360,6 +360,126 @@ class SceneSplitTests(unittest.TestCase):
         self.assertTrue(any("不属于" in issue for issue in builder.validation_issues(scenes, self.config, [], strict=False)))
 
 
+class SummaryQualityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.scene = {
+            "scene": "1-1", "location": "医院", "day": "日", "inside_outside": "内",
+            "people": ["林晓", "老周"], "people_raw": "人物：林晓、老周",
+            "body": ["林晓：昨夜是谁取走了信件？", "老周：我看见李管事拿走了。"],
+            "body_text": "林晓：昨夜是谁取走了信件？\n老周：我看见李管事拿走了。",
+            "heading": "1-1 医院 日 内", "warning": "", "heading_note": "",
+        }
+        self.roles = [("林晓", "晓"), ("老周", "周")]
+        self.review = {
+            "reviewed": True, "summary": "林晓询问信件去向老周称李管事取走",
+            "main_location": "医院", "body_line_count": 2, "hint": "",
+            "on_camera": ["林晓", "老周"], "special_actors": "", "groups": "",
+            "vo": "", "os": "", "costume": "", "props": "", "vehicles": "", "notes": "",
+        }
+        self.config = {"roles": [{"name": name, "mark": mark} for name, mark in self.roles],
+                       "scene_splits": {}, "continuity_groups": [], "scenes": {"1-1": self.review}}
+
+    def test_bare_dialogue_with_known_people_and_header_padding_blocks_strict_delivery(self) -> None:
+        for summary in ("林晓与老周低声对话", "医院日内老周向林晓陈述", "医院傍晚林晓与老周谈",
+                        "林晓和妹妹继续交谈", "二人低声对话", "老周向林晓说明"):
+            with self.subTest(summary=summary):
+                self.review["summary"] = summary
+                issues = builder.validation_issues([self.scene], self.config, self.roles, strict=True)
+                self.assertTrue(any("只写人物" in issue for issue in issues), issues)
+
+    def test_specific_topic_before_or_after_dialogue_verb_is_not_a_bare_template(self) -> None:
+        for summary in ("林晓向老周陈述昨夜取信经过", "林晓就取信经过向老周陈述",
+                        "林晓与老周讨论是否交出账本", "老周称李管事取走信件但林晓对此存疑"):
+            with self.subTest(summary=summary):
+                self.review["summary"] = summary
+                self.assertEqual(builder.summary_quality_issues(self.scene, self.review, self.roles), [])
+
+    def test_quiet_action_and_short_or_long_complete_summaries_are_not_padded_or_truncated(self) -> None:
+        cases = (
+            (["△林晓靠墙等待。"], "林晓靠墙等待"),
+            (["△林晓伸手握住老周的手。"], "林晓握住老周的手"),
+            (["△林晓翻看弟弟旧信，随后收回抽屉。"], "林晓翻看弟弟旧信后收好"),
+            (["林晓：昨夜是谁来取信？", "老周：我看见李管事取走信，但没看见里面写什么。"],
+             "林晓询问昨夜取信人老周称李管事取走但不知信中内容"),
+        )
+        for body, summary in cases:
+            with self.subTest(summary=summary):
+                self.scene.update(body=body, body_text="\n".join(body))
+                self.review["summary"] = summary
+                self.assertEqual(builder.validation_issues([self.scene], self.config, self.roles, strict=True), [])
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    output = Path(tmpdir) / "summary.xlsx"
+                    builder.build_workbook(Path("fixture.docx"), [self.scene], output, self.config)
+                    wb = load_workbook(output)
+                    self.assertEqual([ws["F2"].value for ws in wb], [summary, summary])
+                    wb.close()
+
+    def test_header_codes_are_not_confused_with_meaningful_location_destinations(self) -> None:
+        self.review["summary"] = "医院日内林晓追问老周昨夜信件去向"
+        self.assertTrue(any("表头信息" in issue for issue in builder.summary_quality_issues(self.scene, self.review, self.roles)))
+        for summary in ("林晓追至院门询问昨夜取信人", "林晓与老周讨论医院搬迁事宜", "医院外林晓拦住老周追问取信经过"):
+            self.review["summary"] = summary
+            self.assertEqual(builder.summary_quality_issues(self.scene, self.review, self.roles), [])
+
+    def test_empty_shot_can_describe_environment_without_inventing_a_person(self) -> None:
+        self.scene.update(location="街道空镜", people=[], body=["△雨夜街道，店铺依次熄灯。"])
+        self.review.update(summary="雨夜街道店铺依次熄灯", on_camera=[])
+        self.assertEqual(builder.summary_quality_issues(self.scene, self.review, []), [])
+
+    def test_source_without_dialogue_content_can_preserve_explicit_uncertainty(self) -> None:
+        self.scene.update(body=["△林晓与老周低声交谈。"], body_text="△林晓与老周低声交谈。")
+        self.review.update(summary="林晓与老周低声交谈内容未交代",
+                           notes="原文未提供具体对白，谈话内容需确认")
+        self.assertEqual(builder.validation_issues([self.scene], self.config, self.roles, strict=True), [])
+
+    def test_draft_never_masquerades_as_a_finished_source_excerpt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "draft.xlsx"
+            builder.build_workbook(Path("fixture.docx"), [self.scene], output, {})
+            wb = load_workbook(output)
+            for ws in wb:
+                self.assertTrue(ws["F2"].value.startswith("待复核"))
+                self.assertNotIn("昨夜是谁", ws["F2"].value)
+            wb.close()
+        self.review["summary"] = builder.short_summary(self.scene)
+        issues = builder.validation_issues([self.scene], self.config, self.roles, strict=True)
+        self.assertTrue(any("占位" in issue for issue in issues))
+
+    def test_invalid_summary_types_and_malformed_visible_cast_do_not_crash(self) -> None:
+        for summary in (None, 123, [], {}, "", "……", "1234", "待补写：正文缺页"):
+            with self.subTest(summary=summary):
+                self.review["summary"] = summary
+                self.assertTrue(builder.summary_quality_issues(self.scene, self.review, self.roles))
+        self.review["summary"] = "林晓向老周陈述"
+        self.review["on_camera"] = [None, {}]
+        self.assertTrue(builder.validation_issues([self.scene], self.config, self.roles, strict=True))
+
+    def test_cli_refuses_vague_summary_and_accepts_source_based_dialogue_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            doc = Document()
+            doc.add_paragraph(self.scene["heading"])
+            doc.add_paragraph(self.scene["people_raw"])
+            for line in self.scene["body"]:
+                doc.add_paragraph(line)
+            source = root / "fixture.docx"
+            doc.save(source)
+            config_path, report = root / "config.json", root / "report.json"
+            command = [sys.executable, str(SKILL_ROOT / "scripts/shunchangbiao_builder.py"), str(source),
+                       "--config", str(config_path), "--report", str(report), "--out-dir", str(root / "output"), "--strict"]
+            self.review["summary"] = "医院日内老周向林晓陈述"
+            config_path.write_text(json.dumps(self.config, ensure_ascii=False))
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertFalse(json.loads(report.read_text())[source.name]["delivery_allowed"])
+            self.assertFalse(list((root / "output").glob("*.xlsx")))
+            self.review["summary"] = "林晓询问取信人老周称看见李管事拿走"
+            config_path.write_text(json.dumps(self.config, ensure_ascii=False))
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(json.loads(report.read_text())[source.name]["delivery_allowed"])
+
+
 class PeopleAndDepartmentTests(unittest.TestCase):
     def test_group_roles_and_voice_roles_do_not_become_actor_columns(self) -> None:
         self.assertTrue(builder.is_group_name("百乐门舞女"))
