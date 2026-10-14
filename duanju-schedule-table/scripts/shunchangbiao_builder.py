@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -204,12 +205,16 @@ def parse_heading(
     last_inside_outside: str,
 ) -> tuple[str, str, str, str, str, str] | None:
     text = normalize_scene_heading(text)
-    explicit = re.match(r"^(\d+)\s*[-—–－]\s*(\d+)\s*(.*)$", text)
+    # Some source headings use middle dots between location, time and interior/exterior.
+    text = re.sub(rf"[·•・]\s*({DAY_RE})(?=\s*[·•・])", r" \1", text)
+    text = re.sub(rf"[·•・]\s*({IO_RE})(?=\s*(?:[（(]|$))", r" \1", text)
+    explicit = re.match(r"^(\d+)\s*[-—–－]\s*(\d+)([a-zA-Z]+(?=\s|[·•・\u3400-\u9fff]|$))?\s*(.*)$", text)
     if explicit:
         ep = int(explicit.group(1))
         no = int(explicit.group(2))
         scene_count[ep] = max(scene_count.get(ep, 0), no)
-        remainder = explicit.group(3).strip()
+        suffix = explicit.group(3) or ""
+        remainder = explicit.group(4).strip()
         heading_note = ""
         note_match = re.search(r"\s*[（(]([^）)]*)[）)]\s*$", remainder)
         if note_match:
@@ -252,7 +257,7 @@ def parse_heading(
         if not location:
             location = "场景需确认"
             warnings.append("场景需确认")
-        return f"{ep}-{no}", day, inside_outside, clean_location(location), "；".join(warnings), heading_note
+        return f"{ep}-{no}{suffix}", day, inside_outside, clean_location(location), "；".join(warnings), heading_note
 
     generated = re.match(rf"^({DAY_RE})\s*({IO_RE})\s*(.+)$", text)
     if generated and episode:
@@ -495,6 +500,8 @@ def pdf_lines(path: Path) -> list[str]:
 
 
 def is_pdf_heading(text: str) -> bool:
+    if re.match(r"^\d+\s*[-—–－]\s*\d+", normalize_scene_heading(text)):
+        return True
     normalized = text.replace(" ", "")
     full = r"^\d+\.\s*.+?(?:夜/日|日/夜|日|夜|清晨|上午|下午|傍晚|深夜|凌晨)(?:内外|内|外)$"
     malformed = r"^\d+\.\s*(?:（?闪回）?|（?闪现）?)?(?:一组镜头|手机屏幕|蒙太奇|转场).*$"
@@ -508,6 +515,13 @@ def parse_pdf_heading(
     last_day: str,
     last_inside_outside: str,
 ) -> tuple[str, str, str, str, str, str] | None:
+    if re.match(r"^\d+\s*[-—–－]\s*\d+", normalize_scene_heading(text)):
+        parsed = parse_heading(text, episode, scene_count, last_day, last_inside_outside)
+        if parsed:
+            scene_id, day, inside_outside, location, warning, heading_note = parsed
+            # Keep trailing source annotations traceable in the PDF adapter too.
+            return scene_id, day, inside_outside, location, scene_id.split("-", 1)[1], "；".join(
+                part for part in (warning, heading_note) if part)
     normalized = text.replace(" ", "")
     match = re.match(
         r"^(\d+)\.\s*(.+?)(夜/日|日/夜|日|夜|清晨|上午|下午|傍晚|深夜|凌晨)(内外|内|外)$",
@@ -591,6 +605,8 @@ def parse_pdf(path: Path) -> list[dict]:
         if not parsed:
             continue
         scene_id, day, inside_outside, location, source_num, warning = parsed
+        if "-" in scene_id and scene_id.split("-", 1)[0].isdigit():
+            episode = int(scene_id.split("-", 1)[0])
         last_day = day
         last_inside_outside = inside_outside
         scenes.append(
@@ -1080,6 +1096,126 @@ def location_ordered_scenes(scenes: list[dict], config: dict) -> list[dict]:
     ))
 
 
+def source_body_text(scene: dict) -> str:
+    return scene.get("body_text", "\n".join(scene.get("body", [])))
+
+
+def source_body_digest(scene: dict) -> str:
+    return hashlib.sha256(source_body_text(scene).encode("utf-8")).hexdigest()
+
+
+def split_suffix(index: int) -> str:
+    """Zero-based a..z, aa..az, ... without a fixed part limit."""
+    suffix = ""
+    index += 1
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        suffix = chr(97 + remainder) + suffix
+    return suffix
+
+
+def apply_scene_splits(scenes: list[dict], config: dict) -> tuple[list[dict], list[str]]:
+    """Apply source-reviewed boundaries atomically; never guess from keywords."""
+    originals = [dict(scene, source_body_sha256=source_body_digest(scene)) for scene in scenes]
+    plans = config.get("scene_splits", {})
+    if not isinstance(plans, dict):
+        return originals, ["scene_splits须为原场号到复核拆场记录的对象；无拆场填{}"]
+    source_ids = [scene["scene"] for scene in originals]
+    issues = [f"拆场原场号不存在：{key}" for key in plans if key not in source_ids]
+    replacements = {}
+    allocated = set(source_ids)
+    for source in originals:
+        parent = source["scene"]
+        if parent not in plans:
+            continue
+        label = f"{parent}场内拆分"
+        before = len(issues)
+        plan = plans[parent]
+        if source_ids.count(parent) != 1:
+            issues.append(f"{label}：原场号重复，须先核实源场编号")
+        if re.search(r"[A-Za-z]$", parent):
+            issues.append(f"{label}：原场号已有字母后缀，须先核实源场关系，不能叠加后缀")
+        if not isinstance(plan, dict):
+            issues.append(f"{label}：记录须为对象")
+            continue
+        if plan.get("reviewed") is not True:
+            issues.append(f"{label}：须先逐段核对正文并标记reviewed为true")
+        if not isinstance(plan.get("reason"), str) or not plan["reason"].strip():
+            issues.append(f"{label}：须填写实际画面转场的正文依据reason")
+        if plan.get("source_body_sha256") != source["source_body_sha256"]:
+            issues.append(f"{label}：正文校验值不匹配，请对当前来源重新复核拆分边界")
+        if parent in config.get("scenes", {}):
+            issues.append(f"{label}：scenes中须用各子场复核项替换母场，不能沿用母场字段")
+        parts = plan.get("parts")
+        if not isinstance(parts, list) or len(parts) < 2:
+            issues.append(f"{label}：parts至少包含两个按正文顺序排列的子场")
+            continue
+        text = source_body_text(source)
+        starts = []
+        children = []
+        for index, part in enumerate(parts):
+            child_id = parent + split_suffix(index)
+            if child_id in allocated:
+                issues.append(f"{label}：子场号{child_id}与已有场号冲突")
+            allocated.add(child_id)
+            children.append(child_id)
+            if not isinstance(part, dict):
+                issues.append(f"{child_id}：子场记录须为对象")
+                continue
+            start = part.get("start")
+            starts.append(start)
+            if type(start) is not int or not 0 <= start < len(text):
+                issues.append(f"{child_id}：start须为正文内有效的零起始字符位置")
+            if not isinstance(part.get("location"), str) or not part["location"].strip():
+                issues.append(f"{child_id}：须填写经正文复核的具体场景location")
+            if part.get("day") not in ("日", "夜", "需确认"):
+                issues.append(f"{child_id}：day须为日、夜或需确认")
+            if part.get("inside_outside") not in ("内", "外", "内外", "需确认"):
+                issues.append(f"{child_id}：inside_outside须为内、外、内外或需确认")
+        if len(issues) != before:
+            continue
+        if starts[0] != 0 or any(right <= left for left, right in zip(starts, starts[1:])):
+            issues.append(f"{label}：首段start须为0，其后严格递增，正文不可遗漏、倒序或重复")
+            continue
+        ends = starts[1:] + [len(text)]
+        if any(not text[start:end].strip() for start, end in zip(starts, ends)):
+            issues.append(f"{label}：不能拆出只有空白的子场")
+            continue
+        replacements[parent] = []
+        for index, (part, child_id, start, end) in enumerate(zip(parts, children, starts, ends)):
+            body = text[start:end]
+            # Reconstruct production fields per child, never clone the mother's
+            # entire cast, props, timing, page count or flashback annotations.
+            child = {key: source[key] for key in ("source", "idx", "source_num") if key in source}
+            child.update({
+                "scene": child_id,
+                "source_scene": parent,
+                "source_heading": source.get("heading", ""),
+                "source_body_sha256": source["source_body_sha256"],
+                "source_body_start": start,
+                "source_body_end": end,
+                "split_reason": plan["reason"].strip(),
+                "split_part": index + 1,
+                "split_total": len(parts),
+                "heading": f"{child_id} {part['location'].strip()} {part['day']} {part['inside_outside']}",
+                "location": part["location"].strip(),
+                "day": part["day"],
+                "inside_outside": part["inside_outside"],
+                "body": body.split("\n"),
+                "body_text": body,
+                "body_line_count_draft": None,
+                "body_line_count_basis": "场内拆分后须逐子场核对原排版正文行数，不能继承母场总数",
+                "people": [],
+                "people_raw": "",
+                "heading_note": "",
+                "warning": source.get("warning", ""),
+            })
+            replacements[parent].append(child)
+    if issues:
+        return originals, issues
+    return [part for scene in originals for part in replacements.get(scene["scene"], [scene])], []
+
+
 def validation_issues(
     scenes: list[dict],
     config: dict,
@@ -1115,6 +1251,13 @@ def validation_issues(
     if not strict:
         return issues
 
+    if "scene_splits" not in config:
+        issues.append("未完成场内转场复核：请填写scene_splits，无需拆场时填写空对象{}")
+    elif not isinstance(config["scene_splits"], dict):
+        issues.append("scene_splits须为对象")
+    stale_reviews = sorted(set(config.get("scenes", {})) - set(scene_ids))
+    if stale_reviews:
+        issues.append(f"复核场号不存在或已被拆分：{'、'.join(stale_reviews)}")
     if "continuity_groups" not in config:
         issues.append("未完成连场关系复核：请填写continuity_groups，无连场时填写空列表")
     if "roles" not in config:
@@ -1224,6 +1367,8 @@ def build_workbook(source: Path, scenes: list[dict], output: Path, config: dict)
             reviewed_or_default(review, "vehicles", ""),
             "；".join(ordered_unique([
                 reviewed_or_default(review, "notes", collect_notes(scene)),
+                (f"原场{scene['source_scene']}场内拆分（{scene['split_part']}/{scene['split_total']}）"
+                 if "split_part" in scene else ""),
                 linked_notes.get(scene["scene"], ""),
             ])),
         ]
@@ -1236,6 +1381,13 @@ def build_workbook(source: Path, scenes: list[dict], output: Path, config: dict)
             ws.append(rows_by_scene[scene["scene"]])
         style_sheet(ws, len(headers), len(scenes), len(roles))
         apply_continuity_borders(ws, ordered, continuity_groups)
+        for row, scene in enumerate(ordered, start=2):
+            if "split_part" in scene:
+                ws.cell(row, 4).comment = Comment(
+                    f"原场：{scene['source_heading']}\n拆分依据：{scene['split_reason']}\n"
+                    f"原场正文字符范围：[{scene['source_body_start']}, {scene['source_body_end']})",
+                    "LynnAI",
+                )
         ws["A1"].comment = Comment("保留原顺场序号；分场表按地点归类，不代表实际拍摄日程。", "LynnAI")
         ws["D1"].comment = Comment("同主场景且剧情连续才加黑框；两表复用同一分组，备注保留原顺序的前后关联场号。", "LynnAI")
         if ws.title == "分场表":
@@ -1322,10 +1474,7 @@ def title_from_path(path: Path) -> str:
 def dump_json(path: Path, all_scenes: dict[str, list[dict]]) -> None:
     serializable = {}
     for key, scenes in all_scenes.items():
-        serializable[key] = [
-            {k: v for k, v in scene.items() if k not in {"body_text"}}
-            for scene in scenes
-        ]
+        serializable[key] = scenes
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(serializable, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -1346,14 +1495,18 @@ def main() -> None:
     reports = {}
 
     for source in args.scripts:
-        scenes = parse_script(source)
-        all_scenes[source.name] = scenes
+        source_scenes = parse_script(source)
         output = args.out_dir / f"顺场及分场表-{title_from_path(source)}.xlsx"
         per_file_config = config.get(source.name, config)
+        scenes, split_issues = apply_scene_splits(source_scenes, per_file_config)
+        all_scenes[source.name] = scenes
         roles = resolve_roles(scenes, per_file_config)
-        issues = validation_issues(scenes, per_file_config, roles, strict=args.strict)
+        issues = split_issues + validation_issues(scenes, per_file_config, roles, strict=args.strict)
         reports[source.name] = {
+            "source_scene_count": len(source_scenes),
             "scene_count": len(scenes),
+            "split_map": {parent: [scene["scene"] for scene in scenes if scene.get("source_scene") == parent]
+                          for parent in ordered_unique(scene["source_scene"] for scene in scenes if "source_scene" in scene)},
             "sheets": ["顺场表", "分场表"],
             "issues": issues,
             "strict": args.strict,
@@ -1364,7 +1517,7 @@ def main() -> None:
             print(f"{source.name}: validation issues")
             for issue in issues:
                 print(f"  - {issue}")
-            if args.strict:
+            if args.strict or split_issues:
                 if args.report:
                     args.report.parent.mkdir(parents=True, exist_ok=True)
                     args.report.write_text(json.dumps(reports, ensure_ascii=False, indent=2), encoding="utf-8")

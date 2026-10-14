@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import json
+from copy import deepcopy
 import shutil
 import subprocess
 import tempfile
@@ -18,6 +20,16 @@ import shunchangbiao_builder as builder  # noqa: E402
 
 
 class SceneHeadingTests(unittest.TestCase):
+    def test_source_suffixes_survive_word_and_pdf_heading_parsers(self) -> None:
+        for heading in ("1-1a 客厅 日 内", "1-1a客厅 日 内", "1-1aa 客厅 日 内", "1-1A 客厅·日·内"):
+            with self.subTest(heading=heading):
+                parsed = builder.parse_heading(heading, 1, {}, "", "")
+                self.assertEqual(parsed[0], "1-1A" if "A" in heading else ("1-1aa" if "aa" in heading else "1-1a"))
+                self.assertEqual(parsed[3], "客厅")
+                self.assertTrue(builder.is_pdf_heading(heading))
+                pdf_parsed = builder.parse_pdf_heading(heading, None, {}, "", "")
+                self.assertEqual(pdf_parsed[:4], parsed[:4])
+
     def test_numbered_empty_shot_is_always_a_scene_boundary(self) -> None:
         parsed = builder.parse_heading("1-1空镜", 1, {}, "", "")
 
@@ -113,6 +125,172 @@ class SceneHeadingTests(unittest.TestCase):
             scenes = builder.parse_script(doc_path)
 
         self.assertEqual([scene["scene"] for scene in scenes], ["1-1"])
+
+
+class SceneSplitTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # First transition is mid-paragraph; return to A must remain a third row.
+        body = ["△林晓在客厅拿信。△林晓走到院子，保安拦住她。", "△林晓回到客厅读信。"]
+        self.source = {
+            "scene": "1-1", "source": "fixture.docx", "idx": 0,
+            "heading": "1-1 林宅客厅 日 内", "location": "林宅客厅",
+            "day": "日", "inside_outside": "内", "people": ["林晓", "保安"],
+            "people_raw": "人物：林晓、保安", "heading_note": "", "warning": "",
+            "body": body, "body_text": "\n".join(body), "body_line_count_draft": 30,
+        }
+        text = self.source["body_text"]
+        self.plan = {
+            "reviewed": True, "reason": "林晓由客厅到院子与保安交涉，然后回客厅读信",
+            "source_body_sha256": builder.source_body_digest(self.source),
+            "parts": [
+                {"start": 0, "location": "林宅客厅", "day": "日", "inside_outside": "内"},
+                {"start": text.index("△林晓走到院子"), "location": "林宅院子", "day": "日", "inside_outside": "外"},
+                {"start": text.index("△林晓回到客厅"), "location": "林宅客厅", "day": "日", "inside_outside": "内"},
+            ],
+        }
+        self.config = {
+            "roles": [{"name": "林晓", "mark": "晓"}], "scene_splits": {"1-1": self.plan},
+            "continuity_groups": [{"scenes": ["1-1a", "1-1b", "1-1c"], "reviewed": True,
+                                   "reason": "同在林宅，林晓拿信出院与保安交涉后立即返回读信"}],
+            "scenes": {},
+        }
+        for i, suffix in enumerate("abc"):
+            self.config["scenes"]["1-1" + suffix] = {
+                "reviewed": True, "summary": ["林晓拿起桌上信件准备到院子", "林晓在院子被保安拦住后交涉", "林晓返回客厅坐下仔细读信件"][i],
+                "main_location": "林宅", "body_line_count": [3, 4, 2][i], "hint": "",
+                "on_camera": ["林晓"], "special_actors": "保安" if i == 1 else "", "groups": "",
+                "vo": "", "os": "", "costume": "", "props": "信件" if i != 1 else "",
+                "vehicles": "", "notes": "",
+            }
+
+    def test_mid_paragraph_split_preserves_every_character_and_return_visit(self) -> None:
+        original = deepcopy(self.source)
+        scenes, issues = builder.apply_scene_splits([self.source], self.config)
+        self.assertEqual(issues, [])
+        self.assertEqual([s["scene"] for s in scenes], ["1-1a", "1-1b", "1-1c"])
+        self.assertEqual("".join(s["body_text"] for s in scenes), self.source["body_text"])
+        self.assertEqual(self.source, original)
+        self.assertEqual([s["location"] for s in scenes], ["林宅客厅", "林宅院子", "林宅客厅"])
+        self.assertEqual(scenes[0]["source_body_end"], scenes[1]["source_body_start"])
+        for child in scenes:
+            self.assertEqual(child["source_scene"], "1-1")
+            self.assertEqual(child["source_heading"], self.source["heading"])
+            self.assertEqual(child["people"], [])
+            self.assertIsNone(child["body_line_count_draft"])
+
+    def test_camera_change_and_dialogue_mentions_stay_unsplit_without_reviewed_move(self) -> None:
+        self.source["body_text"] = "△切近景，林晓看向窗外。\n林晓：明天我去医院。"
+        scenes, issues = builder.apply_scene_splits([self.source], {"scene_splits": {}})
+        self.assertEqual(issues, [])
+        self.assertEqual([s["scene"] for s in scenes], ["1-1"])
+
+    def test_invalid_boundaries_reject_all_splits(self) -> None:
+        for starts in ([1, 10, 20], [0, 20, 10], [0, 10, 10], [0, -1, 20],
+                       [0, 10, 999], [False, 10, 20], [0, 1.5, 20], [0, "10", 20]):
+            with self.subTest(starts=starts):
+                config = deepcopy(self.config)
+                for part, start in zip(config["scene_splits"]["1-1"]["parts"], starts):
+                    part["start"] = start
+                scenes, issues = builder.apply_scene_splits([self.source], config)
+                self.assertTrue(issues)
+                self.assertEqual([s["scene"] for s in scenes], ["1-1"])
+
+    def test_stale_source_unknown_parent_and_unreviewed_plan_rejected(self) -> None:
+        for field, value in (("source_body_sha256", "old"), ("reviewed", False),
+                             ("reason", ""), ("parts", []), ("parts", [None, None])):
+            with self.subTest(field=field):
+                config = deepcopy(self.config)
+                config["scene_splits"]["1-1"][field] = value
+                self.assertTrue(builder.apply_scene_splits([self.source], config)[1])
+        self.assertTrue(builder.apply_scene_splits([self.source], {"scene_splits": {"2-9": self.plan}})[1])
+        self.assertTrue(builder.apply_scene_splits([self.source], {"scene_splits": []})[1])
+
+    def test_number_collisions_and_stale_parent_review_rejected(self) -> None:
+        duplicate = dict(self.source, scene="1-1a")
+        self.assertTrue(builder.apply_scene_splits([self.source, duplicate], self.config)[1])
+        self.assertTrue(builder.apply_scene_splits([self.source, self.source], self.config)[1])
+        self.config["scenes"]["1-1"] = self.config["scenes"]["1-1a"]
+        self.assertTrue(builder.apply_scene_splits([self.source], self.config)[1])
+
+    def test_existing_suffix_is_preserved_and_not_automatically_split_again(self) -> None:
+        source = dict(self.source, scene="1-1a")
+        scenes, issues = builder.apply_scene_splits([source], {"scene_splits": {}})
+        self.assertEqual(issues, [])
+        self.assertEqual(scenes[0]["scene"], "1-1a")
+        self.assertTrue(builder.apply_scene_splits([source], {"scene_splits": {"1-1a": self.plan}})[1])
+        self.assertEqual([builder.split_suffix(i) for i in (0, 25, 26, 27)], ["a", "z", "aa", "ab"])
+
+    def test_child_location_and_time_fields_are_required_not_inherited(self) -> None:
+        for field, value in (("location", ""), ("day", []), ("inside_outside", {})):
+            config = deepcopy(self.config)
+            config["scene_splits"]["1-1"]["parts"][1][field] = value
+            self.assertTrue(builder.apply_scene_splits([self.source], config)[1])
+
+    def test_strict_requires_split_review_even_if_none_and_rejects_missing_children(self) -> None:
+        scenes, _ = builder.apply_scene_splits([self.source], self.config)
+        roles = builder.resolve_roles(scenes, self.config)
+        self.assertEqual(builder.validation_issues(scenes, self.config, roles, strict=True), [])
+        del self.config["scenes"]["1-1b"]
+        self.assertTrue(any("1-1b：未完成逐场复核" in issue for issue in builder.validation_issues(scenes, self.config, roles, strict=True)))
+        del self.config["scene_splits"]
+        self.assertTrue(any("场内转场复核" in issue for issue in builder.validation_issues(scenes, self.config, roles, strict=True)))
+
+    def test_both_sheets_share_child_data_and_source_provenance(self) -> None:
+        scenes, _ = builder.apply_scene_splits([self.source], self.config)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "split.xlsx"
+            builder.build_workbook(Path("fixture.docx"), scenes, output, self.config)
+            wb = load_workbook(output)
+            schedule, locations = wb["顺场表"], wb["分场表"]
+            rows = {row[3]: row for row in schedule.iter_rows(min_row=2, values_only=True)}
+            self.assertEqual(rows, {row[3]: row for row in locations.iter_rows(min_row=2, values_only=True)})
+            self.assertEqual([row[3] for row in locations.iter_rows(min_row=2, values_only=True)], ["1-1a", "1-1c", "1-1b"])
+            self.assertEqual([rows["1-1" + s][8] for s in "abc"], [0.1, 0.2, 0.1])
+            self.assertEqual([rows["1-1" + s][10] for s in "abc"], [None, "保安", None])
+            for ws in wb:
+                self.assertEqual(ws["D2"].border.top.style, "thick")
+                self.assertEqual(ws["D4"].border.bottom.style, "thick")
+                self.assertIn("原场：1-1", ws["D2"].comment.text)
+                self.assertIn("原场1-1场内拆分", ws.cell(2, ws.max_column).value)
+            wb.close()
+
+    def test_cross_main_location_split_does_not_qualify_for_one_continuity_box(self) -> None:
+        self.config["scenes"]["1-1b"]["main_location"] = "警局"
+        self.plan["parts"][1]["location"] = "警局门口"
+        scenes, issues = builder.apply_scene_splits([self.source], self.config)
+        self.assertEqual(issues, [])
+        groups, issues = builder.resolve_continuity_groups(scenes, self.config)
+        self.assertEqual(groups, [])
+        self.assertTrue(any("跨主场景" in issue for issue in issues))
+
+    def test_cli_applies_splits_before_strict_validation_and_reports_source_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            script = root / "fixture.docx"
+            doc = Document()
+            doc.add_paragraph(self.source["heading"])
+            for paragraph in self.source["body"]:
+                doc.add_paragraph(paragraph)
+            doc.save(script)
+            config_path, report, dump = root / "config.json", root / "report.json", root / "dump.json"
+            config_path.write_text(json.dumps(self.config, ensure_ascii=False))
+            command = [sys.executable, str(SKILL_ROOT / "scripts/shunchangbiao_builder.py"),
+                       str(script), "--out-dir", str(root / "output"), "--config", str(config_path),
+                       "--report", str(report), "--dump-json", str(dump), "--strict"]
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            record = json.loads(report.read_text())[script.name]
+            self.assertEqual(record["source_scene_count"], 1)
+            self.assertEqual(record["scene_count"], 3)
+            self.assertEqual(record["split_map"], {"1-1": ["1-1a", "1-1b", "1-1c"]})
+            self.assertTrue(record["delivery_allowed"])
+            self.assertEqual("".join(s["body_text"] for s in json.loads(dump.read_text())[script.name]), self.source["body_text"])
+            self.plan["source_body_sha256"] = "stale"
+            config_path.write_text(json.dumps(self.config, ensure_ascii=False))
+            command[command.index("--out-dir") + 1] = str(root / "invalid")
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)
+            self.assertFalse(list((root / "invalid").glob("*.xlsx")))
 
 
 class PeopleAndDepartmentTests(unittest.TestCase):
@@ -228,7 +406,7 @@ class DeliveryValidationTests(unittest.TestCase):
     def test_reviewed_scene_with_explicit_unknowns_can_pass_strict_delivery(self) -> None:
         config = {
             "roles": [],
-            "continuity_groups": [],
+            "scene_splits": {}, "continuity_groups": [],
             "scenes": {
                 "1-1": {
                     "reviewed": True,
@@ -341,7 +519,7 @@ class SpecialActorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.scenes = []
         # Explicit user-supplied roster: other individual roles stay special.
-        self.config = {"roles": [{"name": "沈晚晴", "mark": "晴"}], "continuity_groups": [], "scenes": {}}
+        self.config = {"roles": [{"name": "沈晚晴", "mark": "晴"}], "scene_splits": {}, "continuity_groups": [], "scenes": {}}
         for number in range(1, 4):
             scene_id = f"1-{number}"
             body = [
@@ -441,7 +619,7 @@ class VoiceAndVehicleTests(unittest.TestCase):
         }
         self.config = {
             "roles": [{"name": "沈晚晴", "mark": "晴"}, {"name": "陆锋", "mark": "锋"}],
-            "continuity_groups": [], "scenes": {"1-1": self.review},
+            "scene_splits": {}, "continuity_groups": [], "scenes": {"1-1": self.review},
         }
 
     def test_voice_only_actor_is_not_marked_visible_but_visible_narrator_is(self) -> None:
@@ -556,7 +734,7 @@ class PageCountTests(unittest.TestCase):
 class ContinuityBorderTests(unittest.TestCase):
     def setUp(self) -> None:
         self.scenes = []
-        self.config = {"roles": [], "continuity_groups": [], "scenes": {}}
+        self.config = {"roles": [], "scene_splits": {}, "continuity_groups": [], "scenes": {}}
         for number in range(1, 7):
             scene_id = f"1-{number}"
             self.scenes.append({

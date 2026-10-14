@@ -8,6 +8,7 @@ Use a JSON config to replace automatic draft fields after reading every complete
     {"name": "沈晚晴", "mark": "晴"},
     {"name": "陆锋", "mark": "锋"}
   ],
+  "scene_splits": {},
   "continuity_groups": [],
   "scenes": {
     "1-1": {
@@ -28,8 +29,8 @@ Use a JSON config to replace automatic draft fields after reading every complete
     },
     "1-2": {
       "reviewed": true,
-      "summary": "百乐门与下城区空镜建立环境",
-      "main_location": "百乐门与下城区（组接空镜）",
+      "summary": "百乐门街头空镜交代夜间环境",
+      "main_location": "百乐门",
       "body_line_count": 6,
       "hint": "",
       "on_camera": [],
@@ -66,6 +67,7 @@ Use a JSON config to replace automatic draft fields after reading every complete
 Rules:
 
 - Include every scene under `scenes` for a `--strict` build.
+- Review actual internal location changes before per-scene fields. Explicitly supply top-level `scene_splits` (`{}` after confirming none). For split sources, put only child IDs under `scenes`; each child requires the full reviewed fields. The CLI applies splits before role resolution, validation and both worksheet views.
 - Set `reviewed` to `true` only after comparing the scene fields with the source body.
 - Keep `summary` at 12-18 Chinese characters for normal scenes and 4-18 for empty shots, montage, inserts, phone screens, and transitions.
 - Explicitly provide `roles` after reviewing the complete script: by default include all named plot characters and list childhood versions separately, without asking the user to choose or approve the roster. An explicitly user-supplied scope overrides this default. `[]` is valid when no individual columns apply. Other unnamed individual roles belong in `special_actors`; raw inferred labels still require source review to separate names, aliases, occupation labels and crowds.
@@ -90,10 +92,82 @@ Rules:
 
 ```json
 {
-  "script-a.docx": {"roles": [], "continuity_groups": [], "scenes": {}},
-  "script-b.pdf": {"roles": [], "continuity_groups": [], "scenes": {}}
+  "script-a.docx": {"roles": [], "scene_splits": {}, "continuity_groups": [], "scenes": {}},
+  "script-b.pdf": {"roles": [], "scene_splits": {}, "continuity_groups": [], "scenes": {}}
 }
 ```
+
+## Reviewed internal scene splits
+
+The agent must read every body and actively identify actual filming-space changes,
+even when the source provides only one scene heading. Camera changes or dialogue
+mentions of other places are not location transitions. A→B→A produces three rows.
+Do not ask the user to list the transitions or manually assign suffixes.
+
+The draft `--dump-json` includes each original scene's exact `body_text` and
+`source_body_sha256`. Copy the hash and record character starts against that exact
+string, not PDF page coordinates, Word paragraph indices or layout line counts.
+These are zero-based Python Unicode character offsets, including newlines. The
+first start must be 0; later starts increase strictly. Each part ends at the next
+part's start; the final part ends at the body's length. This partitions every
+character exactly once, including a transition in the middle of a paragraph.
+
+For example, a source `1-1` goes 客厅→院子→客厅. The following Python excerpt builds
+the split section from the draft (the transition phrases must match this example's
+source exactly; they are not universal detection keywords):
+
+```python
+source = draft["example.docx"][0]  # select and verify the original 1-1 record
+text = source["body_text"]
+config["scene_splits"] = {
+    "1-1": {
+        "reviewed": True,
+        "reason": "正文先写客厅收信，再到院子与保安交涉，随后返回客厅读信",
+        "source_body_sha256": source["source_body_sha256"],
+        "parts": [
+            {"start": 0, "location": "林宅客厅", "day": "日", "inside_outside": "内"},
+            {"start": text.index("△林晓走到院子"), "location": "林宅院子", "day": "日", "inside_outside": "外"},
+            {"start": text.index("△林晓回到客厅"), "location": "林宅客厅", "day": "日", "inside_outside": "内"}
+        ]
+    }
+}
+```
+
+- Each plan needs `reviewed: true`, a nonempty source-based `reason`, the matching
+  `source_body_sha256` and at least two `parts`. Each part needs `start`, `location`,
+  `day` (`日`, `夜`, `需确认`) and `inside_outside` (`内`, `外`, `内外`, `需确认`).
+  Review these per part; do not blindly inherit the mother's time or interior/exterior.
+  Keep source-backed specific place names. Unknown metadata needs notes in the child review.
+- IDs are assigned automatically in source order: `1-1a`, `1-1b`, `1-1c`; after z
+  suffixes continue aa, ab. No extra `1-1` row remains and the next original `1-2`
+  is unchanged. Source IDs already carrying suffixes are preserved without a split
+  plan; nested splits require resolving source numbering first, not appending letters.
+  Collisions with existing IDs, stale hashes, missing parents and invalid boundaries
+  block the build, including draft builds; no partially split workbook is written.
+- Repeated phrases require checking the intended occurrence. Never guess a start
+  from a keyword or use an old offset after source edits. Reparse and re-review if
+  the hash changed. Full text coverage checks cannot prove the semantic cut is correct.
+- Replace the mother's entry in `scenes` with a complete review for **each** child
+  (`1-1a`, `1-1b`, `1-1c` here). This also supplies child `main_location` and optional
+  `location_group`. Child cast, department fields and `body_line_count` are independently
+  reviewed; the helper does not inherit the mother's roster or page count.
+- A character slice is not a layout line count. Review each child's original-layout
+  lines; do not count one shared boundary line twice. When attribution is unreliable,
+  use `null` and explain `页数需确认`. Independent ceiling rounding can change the sum
+  of page units compared with computing the unsplit mother once.
+- `continuity_groups` uses final child IDs. Split siblings are not automatically
+  continuous: check same main location and continuing plot separately. The source
+  body order remains unchanged; only 分场表 groups locations afterward.
+- Final dumps retain child `source_scene`, `source_heading`, character interval,
+  source-body hash, split ordinal/total and reason. Notes and scene-cell comments
+  retain provenance in both worksheets without adding columns. Reports expose
+  `source_scene_count`, final `scene_count` and `split_map` for coverage reconciliation.
+- For direct Python use, call `apply_scene_splits(source_scenes, config)` first,
+  stop on any returned issues, and pass the resulting children to `validation_issues`
+  and `build_workbook`. These lower-level functions expect already expanded data.
+
+Existing configs now need `scene_splits` after a source review. Do not bulk-add an
+empty object merely to pass strict mode; review actual internal transitions first.
 
 ## Location-grouped worksheet
 
@@ -146,4 +220,4 @@ The example shows only continuity fields; merge each `main_location` into the co
 
 The first group gets one outer box over its three adjacent scene-number cells. The second gets a one-cell box for `2-1` and one two-cell box for `2-3`/`2-4`; `2-2` is untouched. All members of both groups receive a common group label and preceding/following member references in the notes of both worksheets. 顺场表 retains source order; 分场表 redraws those groups after location sorting. No cells are merged and no extra worksheet column is added.
 
-Group membership is keyed by exact scene IDs, including already-reviewed suffixes such as `1-13a`; this marking feature does not itself split source scenes.
+Group membership is keyed by final scene IDs, including reviewed split suffixes such as `1-13a`. `scene_splits` creates the child rows before this separate continuity-marking step.

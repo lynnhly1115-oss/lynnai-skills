@@ -1,6 +1,6 @@
 ---
 name: duanju-schedule-table
-description: Create checked Excel workbooks with 顺场表 / 顺畅表 / 拍摄顺序表 and a matching location-grouped 分场表 from scripts in .doc, .docx, or text-based .pdf files. Use for reviewed script-order schedules with individual-role columns, 特约演员, 群演, VO, OS, 梳化服, 道具, 戏用车, and 连场 marking.
+description: Create checked Excel workbooks with 顺场表 / 顺畅表 / 拍摄顺序表 and a matching location-grouped 分场表 from scripts in .doc, .docx, or text-based .pdf files. Review and split internal location changes into a/b/c scenes, with individual-role columns, 特约演员, 群演, VO, OS, 梳化服, 道具, 戏用车, and 连场 marking.
 ---
 
 # 剧本顺场表与分场表
@@ -20,6 +20,7 @@ Turn a complete screenplay into two production-facing views of one reviewed data
 - 默认直接按完整剧本整理演员：所有有姓名的剧情角色各占独立列，童年角色另列，其余无姓名的独立小角色放 `特约演员`。**不询问演员分列范围或要求用户确认名单后才继续。** 用户主动指定名单或增删时按其要求执行。每个独立角色用不重复的单字简称标记出镜。
 - Put only role columns and `日/夜`, `内/外`, `页数` in vertical headers. Keep all other headers horizontal.
 - Keep `拍摄顺序` in script order unless the user supplies a different shooting order.
+- 主动逐场检查正文里的实际画面转场。同一原场号包含多个独立拍摄空间时，按正文先后拆成 `1-1a、1-1b、1-1c` 等子场；两表均使用拆分后的同一数据，不等用户逐一指出。
 - Outline each source-reviewed 连场 group in the `场次` column with one thick black outer border per contiguous run. Follow the continuity rules below; do not merge cells or add columns for this marking.
 
 ## Workflow
@@ -39,11 +40,22 @@ Turn a complete screenplay into two production-facing views of one reviewed data
    - full-width dashes, missing spaces, montage, insert, phone-screen, transition, flashback, and extra episodes.
 5. Preserve missing values as `需确认` or make a nearby-scene inference with an explicit note. Never drop the scene.
 6. Run the parser as a draft and dump complete scene data for review.
-7. Read every complete scene body, review main-location identity for every scene, and assemble the full named-character roster without a user-confirmation step; do not limit it to protagonists or a fixed number. Prepare a reviewed config using [review-config.md](references/review-config.md). Review main-location identity and ending-to-opening plot continuity together before recording `continuity_groups` (or `[]` after finding none). Set `reviewed: true` only after checking the source.
-8. Run the final build with `--strict`. It generates `顺场表` and `分场表` together from the reviewed data. Compare both sheets by scene ID and verify identical data, cast marks, page totals and coverage. Do not deliver a workbook that fails strict validation.
+7. Read every complete source scene body and locate actual changes of filming space, including mid-paragraph transitions. Record reviewed `scene_splits` using [review-config.md](references/review-config.md); use `{}` only after checking that no splits are needed. Apply these boundaries before reviewing each resulting child's main location, cast, action, departments and page lines. Assemble the full named-character roster without a user-confirmation step; do not limit it to protagonists or a fixed number. Review main-location identity and ending-to-opening plot continuity together before recording `continuity_groups` (or `[]` after finding none). Set `reviewed: true` only after checking the source.
+8. Run the final build with `--strict`. It applies reviewed splits before validating and generating `顺场表` and `分场表`. Compare both sheets by child scene ID and verify identical data, cast marks, page totals and coverage. Reconcile original scene count, split mapping and final row count; no parent body may be dropped or repeated. Do not deliver a workbook that fails strict validation.
 9. Render both final sheets and visually inspect the populated range. Correct clipping, unreadable vertical headers, excessive row height, or broken printing before delivery.
 
 ## Field Rules
+
+### 场内转场与a/b/c拆场
+
+- **同一个原场号内，画面实际转到另一个独立拍摄空间，就单独分行。** 同一主场景的客厅转院子、异地主线交叉、切到另一地点的闪回画面，都逐段核对实际画面；不能因为仍在一个宅院里就放在一行。
+- 原场 `1-1` 拆两段为 `1-1a、1-1b`，拆三段为 `1-1a、1-1b、1-1c`；第一段也加a，不额外保留一行母场。下一原场仍为 `1-2`，未拆场号不变。原稿已有后缀时先保留，不能盲目再加后缀或覆盖其他场号。
+- **A→B→A要保留三段**，例如客厅→院子→客厅；返回客厅是后一个剧情片段，不能倒回合并到第一行。分场表可以把两段客厅戏排在一起，但仍是不同场号、不同记录。
+- 仅换机位、景别、特写、反打、同空间内走动，不拆；台词提到异地、口述回忆、VO/OS声源变化但没有实际切换画面，也不据此拆。转场界限不清时保留原文并备注“场内转场需确认”，不能凭“切”“转”“外”等单字机械拆分。
+- 拆分覆盖母场全部正文，按源文顺序不遗漏、不重复，段内转场也须准确定位。每个子场分别复核具体地点、主场景、日夜、内外、拍摄内容、出镜角色、特约、群演、VO/OS、梳化服、道具、车辆和正文行数；不能整场复制到所有子场。
+- 每个子场按自己的原排版正文计页数，不继承母场总数。切点落在原排版同一行时，应核对该行两侧片段归属，不能在两个子场重复累计整行；无法可靠计行则明确“页数需确认”。因逐子场向上取整，子场页数之和可能不同于母场直接计算结果。
+- **拆场与连场框是两项独立判断。** 客厅→院子可拆为a/b，并在同主场景且剧情连续时画一组框；宅院→警局同样拆场，但必须断框。拆出的子场不自动视为连场。
+- 生成程序按制表者读正文后给出的边界执行拆分，检查源文一致性、完整覆盖及场号冲突；它不能凭关键词替代语义判断。最终核验每个子场与原场的对应关系，备注和场号批注保留来源，报告列出原场数、拆分映射及最终行数。
 
 ### 顺场表与分场表
 
@@ -188,7 +200,7 @@ The automatic fields are drafts. Final delivery requires complete source review 
 
 ## Required Checks
 
-- Reviewed scene count equals the data-row count in each of the two worksheets; both contain the same unique scene IDs. Preserve any source-reviewed a/b/c splits.
+- `scene_splits` explicitly records complete source-body review, including `{}` when none are needed. For every split, child body slices concatenate to the entire unchanged parent body in order, with no gaps or duplicates; IDs are unique. Final rows = original scenes + sum(each split's child count minus one). Each child is independently reviewed, and both sheets contain the same unique child scene IDs; no redundant parent rows remain.
 - Scene IDs are complete and unique. 顺场表 retains source order; 分场表 groups the same rows by reviewed main/specific location and inside/outside, with source order inside each group. Malformed headings are not silently dropped.
 - No scene body absorbs text from a following scene.
 - Continuity groups are explicitly reviewed, have source-backed reasons for both same main location and continuous plot, contain at least two distinct existing scene IDs in source order, and do not overlap. Every member has a reviewed nonempty `main_location`, identical across the group. `continuity_groups: []` records a checked absence of continuity groups.

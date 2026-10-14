@@ -1,4 +1,4 @@
 interface:
   display_name: "剧本顺场表与分场表"
-  short_description: "自动区分独立角色、特约和群演，生成经复核的顺场表与分场表 Excel"
-  default_prompt: "Use $duanju-schedule-table to review the complete script, classify named characters, special actors and background extras without asking for roster confirmation, and create one Excel workbook containing both script-order 顺场表 and location-grouped 分场表. Reuse the same scene data and only box reviewed continuous plot within one main location."
+  short_description: "复核场内转场并拆为a/b/c，区分演员类型，生成顺场表与分场表 Excel"
+  default_prompt: "Use $duanju-schedule-table to review the complete script, actively split true internal location changes into a/b/c child scenes, classify named characters, special actors and background extras without asking for roster confirmation, and create one Excel workbook containing both script-order 顺场表 and location-grouped 分场表. Review every child independently; camera changes alone do not split a scene. Reuse the same scene data and only box reviewed continuous plot within one main location."
