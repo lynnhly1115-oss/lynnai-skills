@@ -13,6 +13,7 @@ Use a JSON config to replace automatic draft fields after reading every complete
     "1-1": {
       "reviewed": true,
       "summary": "城市空镜交代下城区夜间环境",
+      "main_location": "城市",
       "body_line_count": 3,
       "hint": "",
       "on_camera": [],
@@ -28,6 +29,7 @@ Use a JSON config to replace automatic draft fields after reading every complete
     "1-2": {
       "reviewed": true,
       "summary": "百乐门与下城区空镜建立环境",
+      "main_location": "百乐门与下城区（组接空镜）",
       "body_line_count": 6,
       "hint": "",
       "on_camera": [],
@@ -43,6 +45,8 @@ Use a JSON config to replace automatic draft fields after reading every complete
     "1-3": {
       "reviewed": true,
       "summary": "沈晚晴被保安拦下登记后随护士入内",
+      "main_location": "医院",
+      "location_group": "医院·门厅",
       "body_line_count": 31,
       "hint": "",
       "on_camera": ["沈晚晴"],
@@ -65,7 +69,7 @@ Rules:
 - Set `reviewed` to `true` only after comparing the scene fields with the source body.
 - Keep `summary` at 12-18 Chinese characters for normal scenes and 4-18 for empty shots, montage, inserts, phone screens, and transitions.
 - Explicitly provide `roles` after reviewing the complete script: by default include all named plot characters and list childhood versions separately, without asking the user to choose or approve the roster. An explicitly user-supplied scope overrides this default. `[]` is valid when no individual columns apply. Other unnamed individual roles belong in `special_actors`; raw inferred labels still require source review to separate names, aliases, occupation labels and crowds.
-- Every scene must contain all twelve reviewed fields: `summary`, `body_line_count`, `hint`, `on_camera`, `special_actors`, `groups`, `vo`, `os`, `costume`, `props`, `vehicles`, and `notes`. `on_camera` is a list; `body_line_count` is a positive integer or `null`; all other fields are strings. Empty results use `[]` for `on_camera` and `""` for string fields.
+- Every scene must contain all thirteen reviewed fields: `summary`, `main_location`, `body_line_count`, `hint`, `on_camera`, `special_actors`, `groups`, `vo`, `os`, `costume`, `props`, `vehicles`, and `notes`. `on_camera` is a list; `body_line_count` is a positive integer or `null`; all other fields are strings. Empty cast lists use `[]` for `on_camera`; optional text results use `""`. `summary` and `main_location` must be nonempty.
 - `body_line_count` is the reviewed number of original-layout body text lines in this scene, including action and dialogue and continuing across pages. Exclude scene headings, character rosters, blank lines, headers/footers, page numbers and watermarks. Do not substitute Word paragraph counts or physical page counts. Each already-reviewed a/b/c split is counted independently; continuity groups do not combine counts.
 - Pages are `ceil(body_line_count / 3) * 0.1`, displayed with one decimal: 1–3 lines → 0.1, 4–6 → 0.2, 28–30 → 1.0, 31–33 → 1.1. PDF draft counts require source review; DOCX draft counts remain unknown until checked against the original layout. If reliable counting is impossible or no body exists, use `null` and explain the reason with `页数需确认` in `notes`; the cell displays `需确认`. Zero, negative, fractional, string and Boolean counts are invalid.
 - `hint` fills the `提示` column between `实际拍摄场地` and `场次` with short production tags, e.g. `雨／烟机／闪回／武戏／AI做`. Use only the tags that apply to that scene, separate multiple tags with `／`, and use `""` after confirming none. This is an open set of tags, not a required list to copy into every scene.
@@ -77,9 +81,9 @@ Rules:
 - `special_actors` is a string of exact role labels separated by `、`, for example `保安甲、护士`. Keep annotations in `notes`. Repeat the special actors in every scene where they appear; do not duplicate their identities under `roles` or `groups`.
 - Individually speaking or interacting visible roles are special actors even if their labels contain `保安`, `村民`, or other group-like words. Only the remaining background crowd belongs in `groups`. Voice-only appearances belong in the appropriate voice column; unresolved voice types stay in notes.
 - Existing configs must add all required fields and explicitly populate the source-reviewed `roles` before passing `--strict`; this is the table-maker's review, not a user-approval gate. Do not bulk-fill empty hint/cast/voice/vehicle fields without source review.
-- Keep role marks unique.
+- Role names and single-character marks must both be unique. Follow the ordered cast decision table in `SKILL.md`: named identities first, other individually speaking/interacting roles second, background crowds last. Even one line or one scene can be special; repeated silent appearances do not demote that same identity to a crowd. Childhood/adult versions stay separate, verified aliases are unified, and voice-only or photo-only mentions do not create on-camera marks.
 - Explicitly include `continuity_groups` after reviewing both main-location identity and plot/time/action continuity. Both are required. `[]` means no confirmed groups; omitting it fails `--strict`. Do not bulk-fill `[]` without checking the scenes.
-- Every scene used in a continuity group must supply a nonempty string `main_location` in its per-scene reviewed config, such as `沈宅`. This is source-reviewed metadata, not a new Excel column. All members must have the same value; differences in rooms or attached doorways are allowed only when the source establishes the same main location. A shared city district or shooting venue alone is insufficient. A location change breaks the group; a resulting singleton is not a new group.
+- Every scene must supply a nonempty string `main_location` in its per-scene reviewed config, such as `沈宅`, for the default 分场表. If unknown, use `需确认` and explain why with `主场景需确认` in notes; those scenes stay separate and cannot enter confirmed continuity groups. This is source-reviewed metadata, not a new Excel column. All members of a continuity group must have the same confirmed value; differences in rooms or attached doorways are allowed only when the source establishes the same main location. A shared city district or shooting venue alone is insufficient. A location change breaks the group; a resulting singleton is not a new group.
 - Each group must have `reviewed: true`, a source-backed `reason` covering shared main location and continuous plot, and at least two distinct existing scene IDs in script order. Groups must not overlap. The script checks member main-location equality and group structure; it cannot infer the plot or verify the accuracy of reviewed labels.
 - Uncertain links belong in the relevant scene's `notes` as `连场关系需确认`, not in a confirmed group. Clothing continuity alone is not a group reason.
 - For multiple input scripts, wrap each config under the exact source filename:
@@ -90,6 +94,24 @@ Rules:
   "script-b.pdf": {"roles": [], "continuity_groups": [], "scenes": {}}
 }
 ```
+
+## Location-grouped worksheet
+
+The builder produces both `顺场表` and `分场表` in one workbook, by default named
+`顺场及分场表-<script title>.xlsx`. The two sheets use identical headers and row
+values, including the original script-order index in `拍摄顺序` and the original
+scene label in `剧本中场景`. Only row order and location-group highlighting differ.
+
+- `main_location` is required for every reviewed scene. Use the script's actual location identity, not its city district or a planned shooting venue.
+- Optional `location_group` supplies the source-reviewed canonical **specific space** when aliases refer to the same room/location. Without it, the exact source `location` is used. Never use just the main-location name to collapse different rooms. If present, it must be a nonempty string.
+- Sort first by main location, then by `(specific space, inside_outside)`, using each group's first occurrence in the source. Keep the original order within a group, including day/night and flashbacks; do not sort scene IDs lexically or renumber rows.
+- Unknown main locations or specific spaces are not merged with other unknowns. The notes explain uncertainty; the output has no extra helper sheets, blank group rows, or merged scene cells.
+- Both sheets include the same continuity cross-references in notes for every confirmed group. Redraw the existing groups at their new positions; unrelated adjacent rows never join a group.
+
+Example: two scenes may share `main_location: "林宅"` and
+`location_group: "林宅·客厅"` while their original headings say 林家客厅 and 林宅客厅.
+A 林宅走廊 scene uses a different specific group. A 王宅客厅 scene uses a different
+main location. Day and night scenes of the same interior room remain in one group.
 
 ## Continuity group examples
 
@@ -122,6 +144,6 @@ Add this field to the reviewed config only when the listed scenes exist and the 
 
 The example shows only continuity fields; merge each `main_location` into the complete per-scene review. A shared main location alone does not establish plot continuity. Moving from 沈宅 to 警局 breaks the group even when the action continues.
 
-The first group gets one outer box over its three adjacent scene-number cells. The second gets a one-cell box for `2-1` and one two-cell box for `2-3`/`2-4`; `2-2` is untouched. All members of the second group receive a common group label and preceding/following member references in their notes. No rows are reordered, no cells are merged, and no extra worksheet column is added.
+The first group gets one outer box over its three adjacent scene-number cells. The second gets a one-cell box for `2-1` and one two-cell box for `2-3`/`2-4`; `2-2` is untouched. All members of both groups receive a common group label and preceding/following member references in the notes of both worksheets. 顺场表 retains source order; 分场表 redraws those groups after location sorting. No cells are merged and no extra worksheet column is added.
 
 Group membership is keyed by exact scene IDs, including already-reviewed suffixes such as `1-13a`; this marking feature does not itself split source scenes.

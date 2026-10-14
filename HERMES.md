@@ -57,7 +57,7 @@ Hermes normally runs the scripts automatically. For manual diagnosis, resolve
 the installed skill directory shown by Hermes and replace `<skill-dir>` below.
 Use `python3` on macOS/Linux or `python` on Windows.
 
-Create a short-drama schedule-table draft:
+Create a screenplay schedule draft (one workbook with `顺场表` and `分场表`):
 
 ```bash
 python3 "<skill-dir>/scripts/shunchangbiao_builder.py" script.docx \
@@ -66,7 +66,9 @@ python3 "<skill-dir>/scripts/shunchangbiao_builder.py" script.docx \
   --report work/validation.json
 ```
 
-After reviewing all scenes, run the strict build:
+After reviewing all scenes and their main locations, run the strict build.
+It creates both sheets from one data set; cast categories follow the source
+without a roster-confirmation question:
 
 ```bash
 python3 "<skill-dir>/scripts/shunchangbiao_builder.py" script.docx \

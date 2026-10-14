@@ -17,7 +17,7 @@ art-department prep for scripts of any genre or production format.
 
 | Skill | Output | Best For |
 | --- | --- | --- |
-| [`duanju-schedule-table`](duanju-schedule-table/SKILL.md) | One strictly checked `顺场表` Excel workbook per script | 短剧顺场表、全部有名角色分列、特约/群演、VO/OS、戏用车、同主场景连场标记 |
+| [`duanju-schedule-table`](duanju-schedule-table/SKILL.md) | One checked Excel workbook with `顺场表` + `分场表` per script | 顺场表与分场表、全部有名角色分列、特约/群演、VO/OS、戏用车、同主场景连场标记 |
 | [`ai-live-action-asset-breakdown`](ai-live-action-asset-breakdown/SKILL.md) | One `资产统计表` workbook per project, with reserved image cells | AI真人剧资产统计、按集累计去重、人物/场景/戏用道具、资产变体 |
 | [`screen-art-department-breakdown`](screen-art-department-breakdown/SKILL.md) | One checked folder with four separate workbooks: `顺场表`, `分场表`, `场景表`, `置景道具执行表` | 电影、电视剧、短剧的美术指导、场景拆解、置景道具、采买制作、特殊道具整理 |
 
@@ -75,11 +75,12 @@ the required Python helper can use the skills manually:
 - Read [HERMES.md](HERMES.md) for a Hermes-ready prompt and command examples.
 - Then read the target skill's `SKILL.md` before running a helper script.
 
-## Short-Drama Schedule Tables
+## Script Schedule and Location Tables
 
-`duanju-schedule-table` creates a clean Excel file with one sheet named
-`顺场表`. It keeps scenes in script order and fills the production columns that
-short-drama teams usually need:
+`duanju-schedule-table` creates one Excel file with two visible sheets:
+`顺场表` in script order, then `分场表` grouped by main location, specific space
+and interior/exterior. Both use the same reviewed rows, original scene IDs and
+script-order indices. Its production columns are:
 
 - `拍摄顺序`
 - `实际拍摄场地`
@@ -107,8 +108,9 @@ notes.
 
 ### 默认制作规则
 
-- **演员自动分列**：读完整剧本后，所有有姓名的剧情角色各占一列，童年角色另列，不询问演员范围。用户主动指定名单时按用户要求执行。
-- **特约与群演**：其他无姓名小角色，只要有个人台词或单独对手戏就归特约，不看场次多少；无个人台词或单独对手戏的背景人群归群演。
+- **演员自动分列**：先核对全剧人物身份，有姓名或明确固定昵称的剧情角色各占一列，童年另列，同一身份的别名统一；不询问演员范围。独立列是表格分列方式，不表示演员级别。用户主动指定名单时按用户要求执行。
+- **特约与群演**：其余独立小角色，只出现一场、只说一句话，或无台词但有单独对手戏，都归特约。没有个人台词也没有单独对手戏的背景人群归群演。同一人物全剧分类保持一致，仅声音或照片不勾选现场出镜。
+- **默认两张表**：顺场表完成后，从同一数据生成分场表，相同主场景及具体空间归在一起，组内保留原顺序。两表内容一致，只改变排列；保留原场号、顺场序号和已核定连场关系。
 - **连场黑框**：必须同时满足“同一主场景”和“剧情连续”。同一宅院的客厅、走廊、附属门口可相连；换到警局等另一个主场景必须断框。只框场次列，组内横线保持细线。
 - **页数**：从每场正文起按原排版计行，每3行计0.1，不足3行向上取整；1–3行为0.1，28–30行为1.0。
 - **VO / OS**：VO为当前现场时空之外的旁白/内心独白；OS为当前场景空间内、镜头外发生的现场对白。
@@ -116,8 +118,11 @@ notes.
 
 Upgrading an existing reviewed config: add `body_line_count`, `hint`,
 `on_camera`, `special_actors`, `vo`, `os`, and `vehicles` to every scene after
-source review; explicitly fill `roles` and `continuity_groups`. Every continuity
-group member also needs the same reviewed `main_location`. See the complete
+source review; explicitly fill `roles` and `continuity_groups`. Every scene now
+needs a reviewed `main_location`; optional `location_group` reconciles confirmed
+aliases for the same specific space. Continuity groups still require one shared
+confirmed main location. The default output filename is now
+`顺场及分场表-<script title>.xlsx`. See the complete
 [review config schema](duanju-schedule-table/references/review-config.md).
 The helper validates recorded evidence; it does not replace the agent's full
 script review or automatically establish cast identity and plot continuity.

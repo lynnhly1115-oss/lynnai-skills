@@ -10,6 +10,7 @@ Use `duanju-schedule-table` when the user asks for:
 - 顺场表
 - 顺畅表
 - 拍摄顺序表
+- 将顺场表按相同场景归类的分场表
 - short-drama scene ordering
 - role columns, day/night, interior/exterior, group extras, costume, prop, or
   note extraction from a script
@@ -26,7 +27,7 @@ Use `screen-art-department-breakdown` when the user asks for:
 
 - 美术拆解
 - 美术指导
-- 分场表
+- 美术拆解四表中的分场表
 - 场景表
 - 置景道具执行表
 - set dressing, hand props, purchase, fabrication, rental, borrowing, vehicles,

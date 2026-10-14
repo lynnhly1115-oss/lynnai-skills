@@ -1,17 +1,17 @@
 ---
 name: duanju-schedule-table
-description: Create checked, single-sheet Excel 顺场表 / 顺畅表 / 拍摄顺序表 from short-drama scripts in .doc, .docx, or text-based .pdf files. Use for reviewed script-order schedules with individual-role columns, 特约演员, 群演, VO, OS, 梳化服, 道具, 戏用车, and 连场 marking.
+description: Create checked Excel workbooks with 顺场表 / 顺畅表 / 拍摄顺序表 and a matching location-grouped 分场表 from scripts in .doc, .docx, or text-based .pdf files. Use for reviewed script-order schedules with individual-role columns, 特约演员, 群演, VO, OS, 梳化服, 道具, 戏用车, and 连场 marking.
 ---
 
-# 短剧顺场表
+# 剧本顺场表与分场表
 
-Turn a complete short-drama script into a production-facing schedule table in script order. Keep this skill separate from AI asset breakdown: do not add asset variants, first-appearance deduplication, scene angles, image prompts, or image placeholders.
+Turn a complete screenplay into two production-facing views of one reviewed data set: script order and location grouping. The rules apply across scripts; do not reuse a previous project's cast, locations, or scene groups. Keep this skill separate from AI asset breakdown: do not add asset variants, first-appearance deduplication, scene angles, image prompts, or image placeholders.
 
 ## Output Contract
 
 - Create one `.xlsx` per script unless the user asks otherwise.
-- Keep exactly one sheet named `顺场表`; do not add hidden or helper sheets.
-- Keep one header row only. Do not add separate `演员` or `角色` rows.
+- 默认每个工作簿包含两张可见表，顺序固定为 `顺场表`、`分场表`。先完成并复核顺场数据，再由同一数据生成分场表；两表表头及全部场次内容一致，只改变排列顺序。不加隐藏表或辅助表。
+- Keep one header row on each sheet only. Do not add separate `演员` or `角色` rows.
 - Keep this header order unchanged:
   `拍摄顺序`, `实际拍摄场地`, `提示`, `场次`, `剧本中场景`, `拍摄内容`, `日/夜`, `内/外`, `页数`, individual role columns, `特约演员`, `群演`, `VO`, `OS`, `梳化服提示`, `道具提示`, `戏用车`, `备注/特殊道具/时间`.
 - Leave `实际拍摄场地` blank unless a confirmed practical location is provided.
@@ -39,11 +39,21 @@ Turn a complete short-drama script into a production-facing schedule table in sc
    - full-width dashes, missing spaces, montage, insert, phone-screen, transition, flashback, and extra episodes.
 5. Preserve missing values as `需确认` or make a nearby-scene inference with an explicit note. Never drop the scene.
 6. Run the parser as a draft and dump complete scene data for review.
-7. Read every complete scene body and assemble the full named-character roster without a user-confirmation step; do not limit it to protagonists or a fixed number. Prepare a reviewed config using [review-config.md](references/review-config.md). Review main-location identity and ending-to-opening plot continuity together before recording `continuity_groups` (or `[]` after finding none). Set `reviewed: true` only after checking the source.
-8. Run the final build with `--strict`. Do not deliver a workbook that fails strict validation.
-9. Render the final sheet and visually inspect the populated range. Correct clipping, unreadable vertical headers, excessive row height, or broken printing before delivery.
+7. Read every complete scene body, review main-location identity for every scene, and assemble the full named-character roster without a user-confirmation step; do not limit it to protagonists or a fixed number. Prepare a reviewed config using [review-config.md](references/review-config.md). Review main-location identity and ending-to-opening plot continuity together before recording `continuity_groups` (or `[]` after finding none). Set `reviewed: true` only after checking the source.
+8. Run the final build with `--strict`. It generates `顺场表` and `分场表` together from the reviewed data. Compare both sheets by scene ID and verify identical data, cast marks, page totals and coverage. Do not deliver a workbook that fails strict validation.
+9. Render both final sheets and visually inspect the populated range. Correct clipping, unreadable vertical headers, excessive row height, or broken printing before delivery.
 
 ## Field Rules
+
+### 顺场表与分场表
+
+- `顺场表`按原剧本顺序排列；`分场表`将相同场景放在一起。每个已复核场次在两表各出现一次，不删场、不合并剧情、不新增汇总或空白分隔行。
+- 先按主场景，再按具体子场景及内外分组；组的先后按其在原剧本首次出现的顺序，组内保留原顺场顺序。日夜、跨集、闪回均保留原值，不因归类自行按故事时间重排。同一宅院的客厅、走廊分别成组，同一具体场景的内/外也分组。
+- 每场复核 `main_location`（主场景）。同一具体场景存在不同叫法时，可填 `location_group` 作为经正文确认的统一名称；未提供时按原场景名称分组。两个叫法相似不代表同景，不能靠模糊匹配归并，更不能把不同宅院的“客厅”归为一处。
+- 两表“剧本中场景”保留原文名称，“拍摄顺序”保留原顺场序号，场号及a/b/c后缀原样保留；实际拍摄场地没有用户提供的确定信息时仍留空。分场表只做地点归类，不代表已安排拍摄日程。
+- 未能确认主场景时填 `需确认`，备注说明原因及“主场景需确认”，相关场次单独保留、不互相归并。先完成其余内容，不因此询问整部剧的演员范围或停止制表。
+- 两表共用已核定的连场组。归类后，同组相邻成员才共同闭合外框，分散成员分别成框；不能因位置相邻或同景而新增连场。所有组成员在两表相同的备注中保留组号和按原剧本顺序的接/续场号。
+- 两表均保持 `J2` 冻结窗格、筛选、自动换行、横向打印及重复表头。分场表用场景单元格底色标出分组起点，不合并单元格或新增表头层级。
 
 ### 页数
 
@@ -68,11 +78,11 @@ Turn a complete short-drama script into a production-facing schedule table in sc
 ### 连场判定与场次框线
 
 - **连场黑框必须同时满足：同一主场景，并且剧情时间、人物行动或同一事件紧接发展。** 同一宅院内由客厅追到走廊、门口可归一组；从宅院转到警局，即使紧接同一事件也必须断框。跨集同样逐场核定这两个条件。
-- “主场景”是剧本中的同一地点主体，如同一宅院、商号、警局或戏班；其内部房间、走廊及明确附属的门口可以是不同子场景。不能仅因同属“城西”、都是仓库，或共用一个实际拍摄场地就合为同一主场景。先核同名别称和空间归属，在连场各成员的逐场复核项中填写统一的 `main_location`，不为此增加Excel列。
+- “主场景”是剧本中的同一地点主体，如同一宅院、商号、警局或戏班；其内部房间、走廊及明确附属的门口可以是不同子场景。不能仅因同属“城西”、都是仓库，或共用一个实际拍摄场地就合为同一主场景。先核同名别称和空间归属，在每场的逐场复核项中填写 `main_location`，同一主场景使用统一名称，不为此增加Excel列。
 - 逐场对照前场结尾、后场开头以及中间叙事，确认时间和行动衔接。场号相邻、同一地点、同写“日/夜”、同服装，均不能单独作为连场依据；一般的服装/伤妆接戏要求也不等于连场。明确“次日”“几天后”等时间跳跃应断开。
 - 复核后在 `continuity_groups` 中明确列出组内场号，`reason` 写明同一主场景以及剧情衔接的正文依据。换到另一个主场景时拆组；拆后不足两场的片段不单独算连场。没有连场时填 `[]`；主场景归属或剧情衔接不清的，在备注写“连场关系需确认”，暂不画确认框并继续制作。
 - 同组在表格中连续排列的场次，**只在“场次”列（D列）画一个加粗纯黑外框**：首格上边、末格下边和各格左右边加粗；组内横向分隔线保持普通细线。场号保持原样、每场独立一行，不合并单元格，不加粗场号字体，不把框扩展到其他列。
-- 中间插入别条故事线时，只有原线仍在同一主场景、同一连续时段才能保持同组；人物实际转去别处再返回，不因回到原主场景而重新串为一组。不改剧本顺序，不把无关场次圈入。将同组拆成各自相邻的框选段；同组至少两场但某成员单独落在一段时可单格成框。备注追加同组标识和前后关联场号，如“连场1；接1-3；续1-6”，并保留原有备注。用户另要分场表时，复用已核定关系，不能因同景归类后排在一起就新增连场。
+- 中间插入别条故事线时，只有原线仍在同一主场景、同一连续时段才能保持同组；人物实际转去别处再返回，不因回到原主场景而重新串为一组。不改剧本顺序，不把无关场次圈入。将同组拆成各自相邻的框选段；同组至少两场但某成员单独落在一段时可单格成框。所有连场成员在两表备注均追加同组标识和前后关联场号，如“连场1；接1-3；续1-6”，并保留原有备注。分场表复用已核定关系，不能因同景归类后排在一起就新增连场。
 - 相邻的不同连场组分别闭合外框。一个场次不重复归入多个组；跨线交叉关系不能可靠归为一组时保留待确认说明。
 - 自动解析只出初稿；连场分组必须由完整正文复核确定。严格校验验证分组结构和复核记录，不能代替剧情理解。
 
@@ -85,18 +95,24 @@ Turn a complete short-drama script into a production-facing schedule table in sc
 
 ### 独立角色列、特约演员与群演
 
-- 默认由制表者依据全剧正文复核并填写 `roles`：所有有姓名的剧情角色单列，包含具有明确个人身份的固定昵称及外文名；不能按戏份多少筛选，也不能套用上一部剧的名单或人数。童年/幼年角色与成年角色分列；同一身份的别名按正文统一，无法核实的保留原称谓和备注，不要求用户先选演员范围。
-- 用户主动指定独立列范围时覆盖上述默认规则；`roles` 的“复核”指制表者核对剧本，不是用户批准。没有需独立列出的角色或用户明确要求不设时填 `[]`。仅职业、关系称谓且无姓名的角色，如班主、门房、某人之妻，按个人台词/对手戏规则放特约，不因角色重要就擅自编造姓名。
-- 只在台词或照片中涉及的有姓名剧情角色也可列入名单，但不得因此标记本场实际出镜；备注说明仅提及、照片/影像素材需求。声音出演仍填写VO/OS。独立列名单与每场实际出镜是两件事。
-- Apply the user's distinction to other on-camera cast: **一堆人、看不清脸、无单独台词 = 群演；单独角色，有个人台词/单独对手戏，不管几场 = 特约。** Personal dialogue OR an individual scene with another character is sufficient for `特约演员`; both are not required.
-- Classify special actors versus crowds from each complete scene body and maintain the same identity across scenes. Never demote an individual to a crowd based on occupation, lack of a personal name, scene count, or a group keyword. A `保安`, `护士`, `服务员`, `村民甲`, or `舞女` with personal dialogue or individual interaction belongs in `特约演员`, unless already in the individual-column roster under the default rule or the user's explicit instructions.
-- Use `群演` for background crowds with no individual dialogue or individual scene. If one person in a crowd speaks or has individual interaction, list that person in `特约演员` and only the remaining background crowd in `群演`. Distinguish identities using source labels such as `保安甲`; do not invent character names or headcounts.
-- Fill `特约演员` with the full role labels, separated by `、`, in every scene where they appear. Keep the header horizontal and wrap the cell text. Leave the cell blank when none appear. Write performance requirements or unresolved identity questions in notes.
-- Keep each on-camera cast identity in only one casting category: individual-role columns, `特约演员`, or `群演`. Voice appearances are a separate dimension and may coexist with an on-camera appearance. Incomplete evidence must be flagged `需确认` in notes rather than resolved by guessing.
-- Explicitly fill per-scene `on_camera` with only members of `roles` visibly appearing in that scene. An empty list means none of the independent-column roles is on camera. Sound-only appearances go in `VO`/`OS` without an on-camera mark. Visible special actors still go in `special_actors`.
-- For flashback, surveillance, screen playback, or video-call appearances, keep the role when new footage must be shot and state the appearance form in notes.
-- Detect duplicate one-character role abbreviations and resolve them before delivery.
-- Automated role/group keyword matches are draft candidates only. The reviewer must explicitly fill both `special_actors` and `groups`, including empty strings, after checking dialogue and action. The draft leaves `特约演员` blank until this review; a blank draft cell is not a finding that no special actors are needed.
+这里的“独立角色列”是表格的分列方式，不表示演员级别或戏份轻重。按下面顺序判定；先依据全剧确定同一人物身份，再逐场判断其是否实际出镜。不询问演员范围，用户主动给出不同名单时才覆盖默认分列范围。
+
+| 判定顺序 | 判定依据 | 填写位置 |
+| --- | --- | --- |
+| 1. 有姓名的剧情角色 | 正文有明确姓名，或明确指向一个人的固定昵称、外文名；即使只出现一场也单列 | 各自独立角色列 |
+| 2. 其余独立小角色 | 未列入独立角色列，具有个人台词 **或** 与其他人物的单独对手戏；满足任一项即可 | 特约演员 |
+| 3. 背景人群 | 只承担背景、围观、陪衬作用，没有个人台词，也没有单独对手戏 | 群演 |
+
+- **特约不设最低场次、台词量或时长。** 只出现一场、只说一句话也可归特约；无台词但单独与主角交涉、扶助等对手戏，同样归特约。不能因为戏少而归群演，也不能因为出现多而自动升为独立角色列。
+- 姓名及明确固定昵称决定默认独立分列，不能把所有“有台词的人”都各开一列。`保安甲`、`护士`、`班主`、`门房`、`某人之妻`等职业、编号或关系称谓不自动算姓名；有个人台词或独立对手戏时归特约。固定昵称须有正文身份依据，不能仅因“小/老”字开头就猜作姓名。
+- 例如：`林晓`、固定昵称`小周`各自单列；`童年林晓`与成年`林晓`另列；`保安甲`只说一句“请登记”归特约；无台词但单独搀扶主角的`护士`归特约；其余无个人表演的围观群众归群演。例名仅说明规则，不是下一部剧的固定名单。
+- 姓名、昵称、职务别称若经正文确认是同一人物，统一为一个身份，不能重复设列或跨类别重复填写。童年/幼年版本与成年版本分列；“童年某人”和“幼年某人”是否同一版本依正文统一。仅服装、伤妆或伪装变化不另开角色列。
+- 同一角色在全剧保持一致分类：某个无姓名人物已有个人台词/对手戏，其后无台词的实际出镜场仍放特约；早先列在群演中的同一人物也应回溯拆出。不能把不同场次仅称谓相同的保安、护士擅自认作同一人；身份不明时保留原称谓，在备注标明“人物身份需确认”。
+- 人群中某一人有个人台词或单独对手戏，要单独列入对应的独立角色列或特约；群演只记剩余背景人群。不能因看不清脸就将有个人台词的人归群演，也不能仅凭露脸、特写、职业或人数确定为特约。证据不足时保留原角色标签并在备注标“演员类别需确认”，不编造身份或人数。
+- 默认 `roles` 覆盖全剧有姓名的剧情角色，按首次出现顺序排列；含剧情中的仅声音、被提及或照片人物，但不收录台词里随口引用的历史名人或比喻对象。同一角色的单字简称须唯一，角色姓名也不能重复。仅提及或静态照片没有现场出镜标记，注明声音/照片素材要求；不得凭姓名出现就勾选。
+- `on_camera` 只填本场真实出镜且已列入 `roles` 的角色；童年出镜不能误勾成年。仅声音写VO/OS；本场既出镜又有VO/OS时可同时填写。需要新拍的闪回、监控或屏幕影像按画面人物记录，并在备注标明形式；单纯旧照片或口述不视为现场出镜。
+- `special_actors` 在每个实际出镜场填写完整角色标签，以 `、` 分隔，要求/身份疑点写备注；无特约时填空字符串。三种出镜分类互斥，同一角色不得在独立列、特约和群演中重复统计。仅声音的无名小角色写VO/OS，不同时填本场特约。
+- 自动关键词只提供草稿线索。制表者必须读完整正文复核 `roles`、`on_camera`、`special_actors`、`groups`；脚本检查重复和分类冲突，不能代替角色身份、个人对白及对手戏判断。
 
 ### VO 与 OS
 
@@ -172,8 +188,8 @@ The automatic fields are drafts. Final delivery requires complete source review 
 
 ## Required Checks
 
-- Source scene count equals workbook data-row count.
-- Scene IDs are complete, unique, and in source order; malformed headings are not silently dropped.
+- Reviewed scene count equals the data-row count in each of the two worksheets; both contain the same unique scene IDs. Preserve any source-reviewed a/b/c splits.
+- Scene IDs are complete and unique. 顺场表 retains source order; 分场表 groups the same rows by reviewed main/specific location and inside/outside, with source order inside each group. Malformed headings are not silently dropped.
 - No scene body absorbs text from a following scene.
 - Continuity groups are explicitly reviewed, have source-backed reasons for both same main location and continuous plot, contain at least two distinct existing scene IDs in source order, and do not overlap. Every member has a reviewed nonempty `main_location`, identical across the group. `continuity_groups: []` records a checked absence of continuity groups.
 - Only scene-number cells receive thick black outer borders; internal separators remain thin, other columns and scene numbering remain intact, and intercut unrelated rows are excluded. Noncontiguous members carry cross-references in notes.
@@ -189,7 +205,7 @@ The automatic fields are drafts. Final delivery requires complete source review 
 - Role abbreviations are unique.
 - `梳化服提示` is role-attributed and does not invent styling.
 - `道具提示` contains practical scene needs, not background clutter or asset-deduplication logic.
-- Workbook contains exactly one `顺场表` sheet and the locked header order.
+- Workbook contains exactly two visible sheets, `顺场表` then `分场表`, with the same locked headers. Compare all row values keyed by scene ID, including source indices, cast, page counts and continuity notes; totals and coverage must match. Every scene has reviewed `main_location`; unknowns stay separate with notes. Aliases require reviewed `location_group`, and the displayed original location is preserved.
 - Header row and the first nine context columns through `页数` stay visible while navigating (`J2` freeze panes).
 - Wrapped text is fully visible; row heights expand as needed.
 - Filters, landscape printing, repeated print headers, and visual preview all work.

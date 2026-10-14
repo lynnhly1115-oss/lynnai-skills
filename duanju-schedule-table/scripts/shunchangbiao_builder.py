@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 from collections import OrderedDict
 from copy import copy
 from pathlib import Path
@@ -25,13 +26,14 @@ from docx import Document
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 from openpyxl import Workbook
+from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 CN_DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 CN_UNITS = {"十": 10, "百": 100, "千": 1000}
 EPISODE_RE = r"^\s*第([\d零〇一二两三四五六七八九十百千]+)集"
-VOICE_SUFFIX_RE = re.compile(r"\s*(?:[（(]\s*)?(VO|OS|画外音|电话声|广播声|旁白|内心独白)\s*[）)]?$", re.IGNORECASE)
+VOICE_SUFFIX_RE = re.compile(r"\s*(?:[（(]\s*)?((?<![A-Za-z])(?:VO|OS)|画外音|电话声|广播声|旁白|内心独白)\s*[）)]?$", re.IGNORECASE)
 
 GROUP_HINTS = (
     "若干",
@@ -285,7 +287,7 @@ def normalize_day(day: str) -> str:
 def normalize_person(name: str) -> str:
     name = re.sub(r"【[^】]*】", "", name)
     # Preserve explicit sound labels before removing other parenthetical notes.
-    name = re.sub(r"[（(]\s*(VO|OS)(?=[\s，,）)])[^）)]*[）)]", lambda match: match.group(1).upper(), name, flags=re.IGNORECASE)
+    name = re.sub(r"[（(]\s*(VO|OS)(?=[\s，,）)])[^）)]*[）)]", lambda match: " " + match.group(1).upper(), name, flags=re.IGNORECASE)
     name = re.sub(r"[（(][^）)]*[）)]", "", name)
     name = re.sub(r"[*＊]\s*\d+$", "", name)
     name = name.strip(" 　、，,;；:：")
@@ -881,7 +883,7 @@ def collect_voices(scene: dict) -> dict[str, str]:
         match = VOICE_SUFFIX_RE.search(person)
         if match and match.group(1).lower() in voices:
             voices[match.group(1).lower()].append(clean_voice_name(person) or "未明确角色（需确认）")
-    pattern = r"(?im)^\s*(?:△\s*)?([一-鿿A-Za-z0-9·]+?)\s*(?:[（(]\s*)?(VO|OS)(?=\s|[()（）,:：，]|$)[^:：\n]*[:：]"
+    pattern = r"(?im)^\s*(?:△\s*)?([一-鿿A-Za-z0-9·]+?)\s*(?:[（(]\s*)?(?<![A-Za-z])(VO|OS)(?=\s|[()（）,:：，]|$)[^:：\n]*[:：]"
     for speaker, kind in re.findall(pattern, scene.get("body_text", "")):
         voices[kind.lower()].append(speaker)
     return {kind: "、".join(ordered_unique(names)) for kind, names in voices.items()}
@@ -995,6 +997,8 @@ def resolve_continuity_groups(scenes: list[dict], config: dict) -> tuple[list[li
             missing = [member for member, value in main_locations.items() if not isinstance(value, str) or not value.strip()]
             if missing:
                 issues.append(f"{label}：成员缺少经正文复核的主场景main_location：{'、'.join(missing)}")
+            elif any("需确认" in value or "待确认" in value for value in main_locations.values()):
+                issues.append(f"{label}：主场景尚未确认，不能画确认连场框")
             elif len({value.strip() for value in main_locations.values()}) > 1:
                 detail = '、'.join(f"{member}={value.strip()}" for member, value in main_locations.items())
                 issues.append(f"{label}：跨主场景不能连框：{detail}")
@@ -1008,12 +1012,10 @@ def resolve_continuity_groups(scenes: list[dict], config: dict) -> tuple[list[li
     return ([] if issues else groups), issues
 
 
-def continuity_notes(scenes: list[dict], groups: list[list[str]]) -> dict[str, str]:
-    positions = {scene["scene"]: index for index, scene in enumerate(scenes)}
+def continuity_notes(groups: list[list[str]]) -> dict[str, str]:
+    """Keep the same source-order links in both worksheet views."""
     notes = {}
     for number, members in enumerate(groups, start=1):
-        if all(positions[current] == positions[previous] + 1 for previous, current in zip(members, members[1:])):
-            continue
         for index, member in enumerate(members):
             parts = [f"连场{number}"]
             if index:
@@ -1029,7 +1031,7 @@ def apply_continuity_borders(ws, scenes: list[dict], groups: list[list[str]]) ->
     scene_column = next(cell.column for cell in ws[1] if cell.value == "场次")
     thick = Side(style="thick", color="FF000000")
     for members in groups:
-        member_rows = [rows[member] for member in members]
+        member_rows = sorted(rows[member] for member in members)
         for index, row in enumerate(member_rows):
             cell = ws.cell(row=row, column=scene_column)
             border = copy(cell.border)
@@ -1048,6 +1050,36 @@ def pages_from_body_lines(line_count: int | None) -> float | str:
     return ((line_count + 2) // 3) / 10
 
 
+def location_key(scene: dict, config: dict) -> tuple[str, str, str]:
+    review = scene_review(config, scene["scene"])
+    specific = review.get("location_group") or scene.get("location", "")
+    specific = specific.strip() if isinstance(specific, str) else ""
+    main = review.get("main_location")
+    main = main.strip() if isinstance(main, str) else ""
+    # Unknown locations are separate rows/groups, never a fabricated common set.
+    if not main:
+        main = specific
+    if not main or any(word in main for word in ("需确认", "待确认")):
+        main = f"未确认主场景:{scene['scene']}"
+    if not specific or any(word in specific for word in ("需确认", "待确认")):
+        specific = f"未确认子场景:{scene['scene']}"
+    return main, specific, scene.get("inside_outside", "需确认")
+
+
+def location_ordered_scenes(scenes: list[dict], config: dict) -> list[dict]:
+    """Stable main-location / specific-space grouping, never story-time sorting."""
+    main_order = {}
+    space_order = {}
+    for scene in scenes:
+        key = location_key(scene, config)
+        main_order.setdefault(key[0], len(main_order))
+        space_order.setdefault(key, len(space_order))
+    return sorted(scenes, key=lambda scene: (
+        main_order[location_key(scene, config)[0]],
+        space_order[location_key(scene, config)],
+    ))
+
+
 def validation_issues(
     scenes: list[dict],
     config: dict,
@@ -1062,11 +1094,19 @@ def validation_issues(
     if duplicates:
         issues.append(f"场号重复：{'、'.join(duplicates)}")
 
+    names = [name for name, _ in roles]
+    duplicate_names = ordered_unique(name for name in names if names.count(name) > 1)
+    if duplicate_names:
+        issues.append(f"独立角色姓名重复：{'、'.join(duplicate_names)}")
+    if any(not isinstance(mark, str) or len(mark.strip()) != 1 for _, mark in roles):
+        issues.append("独立角色简称须为单个字符")
+
     marks = [mark for _, mark in roles if mark]
     duplicate_marks = ordered_unique(mark for mark in marks if marks.count(mark) > 1)
     if duplicate_marks:
         issues.append(f"角色简称重复：{'、'.join(duplicate_marks)}")
-    invalid_roles = [name for name, _ in roles if is_group_name(name) or is_voice_name(name)]
+    # Reviewed identities override occupation-keyword draft guesses (e.g. 李保安).
+    invalid_roles = [name for name, _ in roles if is_voice_name(name) or ("roles" not in config and is_group_name(name))]
     if invalid_roles:
         issues.append(f"群演或VO误入角色列：{'、'.join(invalid_roles)}")
 
@@ -1091,10 +1131,18 @@ def validation_issues(
         if review.get("reviewed") is not True:
             issues.append(f"{scene_id}：未完成逐场复核")
             continue
-        required_fields = {"summary", "body_line_count", "hint", "on_camera", "special_actors", "groups", "vo", "os", "costume", "props", "vehicles", "notes"}
+        required_fields = {"summary", "main_location", "body_line_count", "hint", "on_camera", "special_actors", "groups", "vo", "os", "costume", "props", "vehicles", "notes"}
         missing_fields = sorted(required_fields - set(review))
         if missing_fields:
             issues.append(f"{scene_id}：复核字段不完整（缺少{'、'.join(missing_fields)}）")
+        main_location = review.get("main_location")
+        if "main_location" in review:
+            if not isinstance(main_location, str) or not main_location.strip():
+                issues.append(f"{scene_id}：main_location须为复核后的主场景名称，不明时填需确认并写明备注")
+            elif any(word in main_location for word in ("需确认", "待确认")) and "主场景需确认" not in str(review.get("notes", "")):
+                issues.append(f"{scene_id}：主场景不明，备注须写明原因及主场景需确认")
+        if "location_group" in review and (not isinstance(review["location_group"], str) or not review["location_group"].strip()):
+            issues.append(f"{scene_id}：location_group须为经正文确认的具体场景统一名称；无需别名归并时省略")
         if "body_line_count" in review:
             line_count = review["body_line_count"]
             if line_count is None:
@@ -1138,17 +1186,15 @@ def validation_issues(
 def build_workbook(source: Path, scenes: list[dict], output: Path, config: dict) -> None:
     roles = resolve_roles(scenes, config)
     continuity_groups, _ = resolve_continuity_groups(scenes, config)
-    linked_notes = continuity_notes(scenes, continuity_groups)
+    linked_notes = continuity_notes(continuity_groups)
 
     wb = Workbook()
-    ws = wb.active
-    ws.title = "顺场表"
+    wb.active.title = "顺场表"
     headers = ["拍摄顺序", "实际拍摄场地", "提示", "场次", "剧本中场景", "拍摄内容"]
     headers += ["日\n/\n夜", "内\n/\n外", "页\n数"]
     headers += [vertical(role) for role, _ in roles]
     headers += ["特约演员", "群演", "VO", "OS", "梳化服提示", "道具提示", "戏用车", "备注/特殊道具/时间"]
-    ws.append(headers)
-
+    rows_by_scene = {}
     role_names = {role for role, _ in roles}
     for order, scene in enumerate(scenes, start=1):
         review = scene_review(config, scene["scene"])
@@ -1181,10 +1227,27 @@ def build_workbook(source: Path, scenes: list[dict], output: Path, config: dict)
                 linked_notes.get(scene["scene"], ""),
             ])),
         ]
-        ws.append(row)
+        rows_by_scene[scene["scene"]] = row
 
-    style_sheet(ws, len(headers), len(scenes), len(roles))
-    apply_continuity_borders(ws, scenes, continuity_groups)
+    views = [(wb.active, scenes), (wb.create_sheet("分场表"), location_ordered_scenes(scenes, config))]
+    for ws, ordered in views:
+        ws.append(headers)
+        for scene in ordered:
+            ws.append(rows_by_scene[scene["scene"]])
+        style_sheet(ws, len(headers), len(scenes), len(roles))
+        apply_continuity_borders(ws, ordered, continuity_groups)
+        ws["A1"].comment = Comment("保留原顺场序号；分场表按地点归类，不代表实际拍摄日程。", "LynnAI")
+        ws["D1"].comment = Comment("同主场景且剧情连续才加黑框；两表复用同一分组，备注保留原顺序的前后关联场号。", "LynnAI")
+        if ws.title == "分场表":
+            ws["E1"].comment = Comment("按主场景、具体子场景及内外归类；组内保留原顺场顺序，单元格保留剧本原场景名称。", "LynnAI")
+            previous_key = None
+            for row_number, scene in enumerate(ordered, start=2):
+                key = location_key(scene, config)
+                if key != previous_key:
+                    ws.cell(row_number, 5).fill = PatternFill("solid", fgColor="D9E8ED")
+                    ws.cell(row_number, 5).font = Font(name="Microsoft YaHei", size=10, bold=True, color="1F4E5F")
+                ws.cell(row_number, 5).comment = Comment(f"主场景：{key[0]}\n具体场景归类：{key[1]}\n内外：{key[2]}", "LynnAI")
+                previous_key = key
     wb.save(output)
 
 
@@ -1218,7 +1281,7 @@ def style_sheet(ws, max_col: int, scene_count: int, role_count: int) -> None:
         cell.font = header_font
         cell.border = border
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    ws.row_dimensions[1].height = max(82, min(140, 12 * max(6, role_count)))
+    ws.row_dimensions[1].height = max(82, min(409, 14 * max(str(cell.value).count("\n") + 1 for cell in ws[1]) + 16))
 
     for row in range(2, scene_count + 2):
         fill = alt_fill if row % 2 == 0 else white_fill
@@ -1234,9 +1297,9 @@ def style_sheet(ws, max_col: int, scene_count: int, role_count: int) -> None:
         estimated_lines = 1
         for col, width in text_columns:
             value = str(ws.cell(row=row, column=col).value or "")
-            line_count = sum(max(1, math.ceil(len(part) / width)) for part in value.split("\n"))
+            line_count = sum(max(1, math.ceil(sum(2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1 for char in part) / (width - 1))) for part in value.split("\n"))
             estimated_lines = max(estimated_lines, line_count)
-        ws.row_dimensions[row].height = min(108, max(36, 20 * estimated_lines + 8))
+        ws.row_dimensions[row].height = min(409, max(36, 20 * estimated_lines + 8))
 
     for col, width in {1: 8, 2: 14, 3: 14, 4: 9, 5: 23, 6: 20}.items():
         ws.column_dimensions[get_column_letter(col)].width = width
@@ -1268,7 +1331,7 @@ def dump_json(path: Path, all_scenes: dict[str, list[dict]]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build short-drama 顺场表 Excel files from DOCX/PDF scripts.")
+    parser = argparse.ArgumentParser(description="Build checked 顺场表 and 分场表 sheets from DOCX/PDF scripts.")
     parser.add_argument("scripts", nargs="+", type=Path)
     parser.add_argument("--out-dir", type=Path, default=Path.cwd())
     parser.add_argument("--config", type=Path)
@@ -1285,12 +1348,13 @@ def main() -> None:
     for source in args.scripts:
         scenes = parse_script(source)
         all_scenes[source.name] = scenes
-        output = args.out_dir / f"顺场表-{title_from_path(source)}.xlsx"
+        output = args.out_dir / f"顺场及分场表-{title_from_path(source)}.xlsx"
         per_file_config = config.get(source.name, config)
         roles = resolve_roles(scenes, per_file_config)
         issues = validation_issues(scenes, per_file_config, roles, strict=args.strict)
         reports[source.name] = {
             "scene_count": len(scenes),
+            "sheets": ["顺场表", "分场表"],
             "issues": issues,
             "strict": args.strict,
             "draft_valid": not issues,

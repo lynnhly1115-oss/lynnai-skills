@@ -1,4 +1,4 @@
 interface:
-  display_name: "短剧顺场表"
-  short_description: "把短剧剧本整理成经逐场复核的单表顺场表 Excel"
-  default_prompt: "Use $duanju-schedule-table to create a checked Excel 顺场表, automatically giving every named plot character and each childhood version an individual column without asking for roster confirmation, and boxing only scenes that share a main location and continuous plot."
+  display_name: "剧本顺场表与分场表"
+  short_description: "自动区分独立角色、特约和群演，生成经复核的顺场表与分场表 Excel"
+  default_prompt: "Use $duanju-schedule-table to review the complete script, classify named characters, special actors and background extras without asking for roster confirmation, and create one Excel workbook containing both script-order 顺场表 and location-grouped 分场表. Reuse the same scene data and only box reviewed continuous plot within one main location."
