@@ -17,7 +17,7 @@ art-department prep for scripts of any genre or production format.
 
 | Skill | Output | Best For |
 | --- | --- | --- |
-| [`duanju-schedule-table`](duanju-schedule-table/SKILL.md) | One strictly checked `顺场表` Excel workbook per script | 短剧顺场表、拍摄顺序表、角色出场、日夜内外、群演、梳化服、道具提示 |
+| [`duanju-schedule-table`](duanju-schedule-table/SKILL.md) | One strictly checked `顺场表` Excel workbook per script | 短剧顺场表、全部有名角色分列、特约/群演、VO/OS、戏用车、同主场景连场标记 |
 | [`ai-live-action-asset-breakdown`](ai-live-action-asset-breakdown/SKILL.md) | One `资产统计表` workbook per project, with reserved image cells | AI真人剧资产统计、按集累计去重、人物/场景/戏用道具、资产变体 |
 | [`screen-art-department-breakdown`](screen-art-department-breakdown/SKILL.md) | One checked folder with four separate workbooks: `顺场表`, `分场表`, `场景表`, `置景道具执行表` | 电影、电视剧、短剧的美术指导、场景拆解、置景道具、采买制作、特殊道具整理 |
 
@@ -83,22 +83,44 @@ short-drama teams usually need:
 
 - `拍摄顺序`
 - `实际拍摄场地`
+- `提示`（如雨、烟机、闪回、武戏、AI做）
 - `场次`
 - `剧本中场景`
 - `拍摄内容`
 - `日/夜`
 - `内/外`
 - `页数`
-- one column per role
+- one column per named plot character, with childhood versions kept separate
+- `特约演员`
 - `群演`
+- `VO`
+- `OS`
 - `梳化服提示`
 - `道具提示`
+- `戏用车`
 - `备注/特殊道具/时间`
 
 The skill handles common messy script formatting, including missing spaces,
 day/night and interior/exterior markers written in different positions,
 embedded flashbacks, montage headings, group characters, and practical prop
 notes.
+
+### 默认制作规则
+
+- **演员自动分列**：读完整剧本后，所有有姓名的剧情角色各占一列，童年角色另列，不询问演员范围。用户主动指定名单时按用户要求执行。
+- **特约与群演**：其他无姓名小角色，只要有个人台词或单独对手戏就归特约，不看场次多少；无个人台词或单独对手戏的背景人群归群演。
+- **连场黑框**：必须同时满足“同一主场景”和“剧情连续”。同一宅院的客厅、走廊、附属门口可相连；换到警局等另一个主场景必须断框。只框场次列，组内横线保持细线。
+- **页数**：从每场正文起按原排版计行，每3行计0.1，不足3行向上取整；1–3行为0.1，28–30行为1.0。
+- **VO / OS**：VO为当前现场时空之外的旁白/内心独白；OS为当前场景空间内、镜头外发生的现场对白。
+- **提示与车辆**：提示写简短拍摄需求；戏用车辆单列。所有内容均须以正文或已确定制作要求为依据。
+
+Upgrading an existing reviewed config: add `body_line_count`, `hint`,
+`on_camera`, `special_actors`, `vo`, `os`, and `vehicles` to every scene after
+source review; explicitly fill `roles` and `continuity_groups`. Every continuity
+group member also needs the same reviewed `main_location`. See the complete
+[review config schema](duanju-schedule-table/references/review-config.md).
+The helper validates recorded evidence; it does not replace the agent's full
+script review or automatically establish cast identity and plot continuity.
 
 Generate a draft parse for review:
 

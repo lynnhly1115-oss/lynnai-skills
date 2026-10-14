@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 from collections import OrderedDict
+from copy import copy
 from pathlib import Path
 
 from dependency_bootstrap import ensure_dependencies
@@ -30,6 +31,7 @@ from openpyxl.utils import get_column_letter
 CN_DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 CN_UNITS = {"十": 10, "百": 100, "千": 1000}
 EPISODE_RE = r"^\s*第([\d零〇一二两三四五六七八九十百千]+)集"
+VOICE_SUFFIX_RE = re.compile(r"\s*(?:[（(]\s*)?(VO|OS|画外音|电话声|广播声|旁白|内心独白)\s*[）)]?$", re.IGNORECASE)
 
 GROUP_HINTS = (
     "若干",
@@ -129,7 +131,6 @@ PROP_KEYWORDS = [
     ("对讲机", "对讲机"),
     ("椅子", "椅子"),
     ("玻璃瓶", "玻璃瓶"),
-    ("豪车", "豪车"),
     ("清洁工具", "清洁工具"),
     ("水桶", "水桶"),
     ("冷水", "冷水"),
@@ -283,6 +284,8 @@ def normalize_day(day: str) -> str:
 
 def normalize_person(name: str) -> str:
     name = re.sub(r"【[^】]*】", "", name)
+    # Preserve explicit sound labels before removing other parenthetical notes.
+    name = re.sub(r"[（(]\s*(VO|OS)(?=[\s，,）)])[^）)]*[）)]", lambda match: match.group(1).upper(), name, flags=re.IGNORECASE)
     name = re.sub(r"[（(][^）)]*[）)]", "", name)
     name = re.sub(r"[*＊]\s*\d+$", "", name)
     name = name.strip(" 　、，,;；:：")
@@ -446,6 +449,8 @@ def parse_docx(path: Path) -> list[dict]:
             body.append(text)
         scene["body"] = body
         scene["body_text"] = "\n".join(body)
+        scene["body_line_count_draft"] = None
+        scene["body_line_count_basis"] = "需对照原排版核行；Word段落数不是排版行数"
     augment_visible_people(scenes)
     return scenes
 
@@ -619,6 +624,8 @@ def parse_pdf(path: Path) -> list[dict]:
             body.append(text)
         scene["body"] = body
         scene["body_text"] = "\n".join(body)
+        scene["body_line_count_draft"] = sum(bool(text.strip()) for text in body) or None
+        scene["body_line_count_basis"] = "PDF排版行提取草稿；须对照原页排除人物名单续行、页眉页脚、页码及水印后复核"
     augment_visible_people(scenes)
     return scenes
 
@@ -682,16 +689,16 @@ def is_group_name(name: str) -> bool:
 
 
 def is_voice_name(name: str) -> bool:
-    return bool(re.search(r"(?:VO|OS|画外音|电话声|广播声)$", name.strip(), flags=re.IGNORECASE))
+    return bool(VOICE_SUFFIX_RE.search(name.strip()))
 
 
 def clean_voice_name(name: str) -> str:
-    return re.sub(r"(?:VO|OS|画外音|电话声|广播声)$", "", name.strip(), flags=re.IGNORECASE).strip()
+    return VOICE_SUFFIX_RE.sub("", name.strip()).strip()
 
 
 def voice_note(name: str) -> str:
     stripped = name.strip()
-    suffix_match = re.search(r"(VO|OS|画外音|电话声|广播声)$", stripped, flags=re.IGNORECASE)
+    suffix_match = VOICE_SUFFIX_RE.search(stripped)
     if not suffix_match:
         return stripped
     suffix = suffix_match.group(1)
@@ -867,19 +874,26 @@ def costume_hints_for_text(text: str) -> list[str]:
     return [label for pattern, label in rules if re.search(pattern, text)]
 
 
+def collect_voices(scene: dict) -> dict[str, str]:
+    """Draft explicit source labels only; final spatial/temporal classification is reviewed."""
+    voices = {"vo": [], "os": []}
+    for person in scene.get("people", []):
+        match = VOICE_SUFFIX_RE.search(person)
+        if match and match.group(1).lower() in voices:
+            voices[match.group(1).lower()].append(clean_voice_name(person) or "未明确角色（需确认）")
+    pattern = r"(?im)^\s*(?:△\s*)?([一-鿿A-Za-z0-9·]+?)\s*(?:[（(]\s*)?(VO|OS)(?=\s|[()（）,:：，]|$)[^:：\n]*[:：]"
+    for speaker, kind in re.findall(pattern, scene.get("body_text", "")):
+        voices[kind.lower()].append(speaker)
+    return {kind: "、".join(ordered_unique(names)) for kind, names in voices.items()}
+
+
 def collect_notes(scene: dict) -> str:
     text = scene["body_text"]
     notes = []
     if "字幕" in text:
         notes.append("含字幕")
-    voice_mentions = re.findall(
-        r"(?im)^(?:△\s*)?([一-鿿A-Za-z0-9]+)\s*(VO|OS)\s*(?:[（(][^）)]*[）)])?\s*[:：]",
-        text,
-    )
-    if voice_mentions:
-        notes.extend(f"{speaker}{kind.upper()}" for speaker, kind in voice_mentions)
-    elif re.search(r"VO|vo|画外音", text):
-        notes.append("含VO")
+    if re.search(r"画外音|电话声|广播声|旁白|内心独白", text) and not any(collect_voices(scene).values()):
+        notes.append("声音类型需按声源时空确认")
     if re.search(r"闪回|回忆", text):
         notes.append("闪回/回忆")
     if re.search(r"接吻|亲吻|强吻|乱亲|床上|压在|抱住.*亲|衣衫不整|睡裙|钻进被窝", text):
@@ -895,8 +909,9 @@ def collect_notes(scene: dict) -> str:
     if scene.get("heading_note"):
         notes.append(scene["heading_note"])
     for person in scene.get("people", []):
-        if is_voice_name(person):
-            notes.append(voice_note(person))
+        match = VOICE_SUFFIX_RE.search(person)
+        if match and match.group(1).upper() not in {"VO", "OS"}:
+            notes.append(f"{voice_note(person)}：VO/OS类型需确认")
     return "；".join(ordered_unique(notes))
 
 
@@ -912,9 +927,25 @@ def load_config(path: Path | None) -> dict:
 
 def resolve_roles(scenes: list[dict], config: dict) -> list[tuple[str, str]]:
     role_config = config.get("roles")
-    if role_config:
+    if role_config is not None:
         return [(item["name"], item.get("mark") or default_mark(item["name"])) for item in role_config]
-    return infer_roles(scenes)
+    specials = reviewed_special_names(scenes, config)
+    return [(name, mark) for name, mark in infer_roles(scenes) if name not in specials]
+
+
+def cast_names(value: str) -> list[str]:
+    """Read reviewed cast labels, not dialogue or occupation-based guesses."""
+    if not isinstance(value, str):
+        return []
+    return ordered_unique(re.split(r"[、；;\n]+", value))
+
+
+def reviewed_special_names(scenes: list[dict], config: dict) -> set[str]:
+    return {
+        name
+        for scene in scenes
+        for name in cast_names(scene_review(config, scene["scene"]).get("special_actors", ""))
+    }
 
 
 def scene_review(config: dict, scene_id: str) -> dict:
@@ -927,6 +958,94 @@ def scene_review(config: dict, scene_id: str) -> dict:
 
 def reviewed_or_default(review: dict, key: str, default: str) -> str:
     return review[key] if key in review else default
+
+
+def resolve_continuity_groups(scenes: list[dict], config: dict) -> tuple[list[list[str]], list[str]]:
+    """Use source-reviewed relationships; adjacency alone is never evidence."""
+    raw_groups = config.get("continuity_groups", [])
+    if not isinstance(raw_groups, list):
+        return [], ["连场分组continuity_groups须为列表，无连场时填空列表"]
+    positions = {scene["scene"]: index for index, scene in enumerate(scenes)}
+    groups = []
+    issues = []
+    assigned = set()
+    for number, group in enumerate(raw_groups, start=1):
+        label = f"连场{number}"
+        if not isinstance(group, dict):
+            issues.append(f"{label}：须填写scenes、reviewed和reason")
+            continue
+        members = group.get("scenes")
+        if not isinstance(members, list) or len(members) < 2 or not all(isinstance(member, str) for member in members):
+            issues.append(f"{label}：须包含至少两个场次编号")
+            continue
+        if group.get("reviewed") is not True:
+            issues.append(f"{label}：未完成剧情衔接复核")
+        reason = group.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            issues.append(f"{label}：缺少来自正文的同主场景及时间、行动衔接依据reason")
+        if len(set(members)) != len(members):
+            issues.append(f"{label}：场次编号重复")
+        unknown = [member for member in members if member not in positions]
+        if unknown:
+            issues.append(f"{label}：场次不存在：{'、'.join(unknown)}")
+        elif members != sorted(members, key=positions.get):
+            issues.append(f"{label}：场次须按原剧本顺序填写")
+        if not unknown:
+            main_locations = {member: scene_review(config, member).get("main_location") for member in members}
+            missing = [member for member, value in main_locations.items() if not isinstance(value, str) or not value.strip()]
+            if missing:
+                issues.append(f"{label}：成员缺少经正文复核的主场景main_location：{'、'.join(missing)}")
+            elif len({value.strip() for value in main_locations.values()}) > 1:
+                detail = '、'.join(f"{member}={value.strip()}" for member, value in main_locations.items())
+                issues.append(f"{label}：跨主场景不能连框：{detail}")
+        overlap = sorted(assigned.intersection(members))
+        if overlap:
+            issues.append(f"{label}：同一场次重复归入多个连场组：{'、'.join(overlap)}")
+        assigned.update(members)
+        groups.append(members)
+    # Do not display potentially misleading confirmed boxes in a draft with
+    # malformed, overlapping, or unreviewed continuity metadata.
+    return ([] if issues else groups), issues
+
+
+def continuity_notes(scenes: list[dict], groups: list[list[str]]) -> dict[str, str]:
+    positions = {scene["scene"]: index for index, scene in enumerate(scenes)}
+    notes = {}
+    for number, members in enumerate(groups, start=1):
+        if all(positions[current] == positions[previous] + 1 for previous, current in zip(members, members[1:])):
+            continue
+        for index, member in enumerate(members):
+            parts = [f"连场{number}"]
+            if index:
+                parts.append(f"接{members[index - 1]}")
+            if index + 1 < len(members):
+                parts.append(f"续{members[index + 1]}")
+            notes[member] = "；".join(parts)
+    return notes
+
+
+def apply_continuity_borders(ws, scenes: list[dict], groups: list[list[str]]) -> None:
+    rows = {scene["scene"]: index + 2 for index, scene in enumerate(scenes)}
+    scene_column = next(cell.column for cell in ws[1] if cell.value == "场次")
+    thick = Side(style="thick", color="FF000000")
+    for members in groups:
+        member_rows = [rows[member] for member in members]
+        for index, row in enumerate(member_rows):
+            cell = ws.cell(row=row, column=scene_column)
+            border = copy(cell.border)
+            border.left = thick
+            border.right = thick
+            if index == 0 or member_rows[index - 1] != row - 1:
+                border.top = thick
+            if index == len(member_rows) - 1 or member_rows[index + 1] != row + 1:
+                border.bottom = thick
+            cell.border = border
+
+
+def pages_from_body_lines(line_count: int | None) -> float | str:
+    if type(line_count) is not int or line_count <= 0:
+        return "需确认"
+    return ((line_count + 2) // 3) / 10
 
 
 def validation_issues(
@@ -951,8 +1070,20 @@ def validation_issues(
     if invalid_roles:
         issues.append(f"群演或VO误入角色列：{'、'.join(invalid_roles)}")
 
+    _, continuity_issues = resolve_continuity_groups(scenes, config)
+    issues.extend(continuity_issues)
     if not strict:
         return issues
+
+    if "continuity_groups" not in config:
+        issues.append("未完成连场关系复核：请填写continuity_groups，无连场时填写空列表")
+    if "roles" not in config:
+        issues.append("未填写经正文复核的独立角色名单：按默认分列规则生成roles，无独立角色时填写空列表")
+    special_names = reviewed_special_names(scenes, config)
+    main_names = {name for name, _ in roles}
+    overlapping_roles = sorted(special_names & main_names)
+    if overlapping_roles:
+        issues.append(f"特约演员与独立角色列重复：{'、'.join(overlapping_roles)}")
 
     for scene in scenes:
         scene_id = scene["scene"]
@@ -960,10 +1091,34 @@ def validation_issues(
         if review.get("reviewed") is not True:
             issues.append(f"{scene_id}：未完成逐场复核")
             continue
-        required_fields = {"summary", "groups", "costume", "props", "notes"}
+        required_fields = {"summary", "body_line_count", "hint", "on_camera", "special_actors", "groups", "vo", "os", "costume", "props", "vehicles", "notes"}
         missing_fields = sorted(required_fields - set(review))
         if missing_fields:
             issues.append(f"{scene_id}：复核字段不完整（缺少{'、'.join(missing_fields)}）")
+        if "body_line_count" in review:
+            line_count = review["body_line_count"]
+            if line_count is None:
+                if "页数需确认" not in str(review.get("notes", "")):
+                    issues.append(f"{scene_id}：正文行数无法可靠核定，备注须写明原因及页数需确认")
+            elif type(line_count) is not int or line_count <= 0:
+                issues.append(f"{scene_id}：body_line_count须为原排版正文行数的正整数，无法核定时填null并在备注说明")
+        if "special_actors" in review and not isinstance(review["special_actors"], str):
+            issues.append(f"{scene_id}：special_actors须为角色名字符串，无特约演员时填空字符串")
+        for field in ("vo", "os", "vehicles", "hint"):
+            if field in review and not isinstance(review[field], str):
+                issues.append(f"{scene_id}：{field}须为字符串，没有该项时填空字符串")
+        if "on_camera" in review:
+            visible = review["on_camera"]
+            if not isinstance(visible, list) or not all(isinstance(name, str) and name in main_names for name in visible):
+                issues.append(f"{scene_id}：on_camera须为本场出镜独立角色名列表，且角色须已列入roles")
+            elif len(set(visible)) != len(visible):
+                issues.append(f"{scene_id}：on_camera角色名重复")
+        voice_specials = [name for name in cast_names(review.get("special_actors", "")) if is_voice_name(name)]
+        if voice_specials:
+            issues.append(f"{scene_id}：仅声音角色应填VO/OS列，类型不明时在备注待确认，不填特约演员：{'、'.join(voice_specials)}")
+        group_overlap = sorted(set(cast_names(review.get("groups", ""))) & (special_names | main_names))
+        if group_overlap:
+            issues.append(f"{scene_id}：独立角色误入群演：{'、'.join(group_overlap)}")
         summary = str(review.get("summary", "")).strip()
         if not summary:
             issues.append(f"{scene_id}：拍摄内容未填写")
@@ -982,45 +1137,63 @@ def validation_issues(
 
 def build_workbook(source: Path, scenes: list[dict], output: Path, config: dict) -> None:
     roles = resolve_roles(scenes, config)
+    continuity_groups, _ = resolve_continuity_groups(scenes, config)
+    linked_notes = continuity_notes(scenes, continuity_groups)
 
     wb = Workbook()
     ws = wb.active
     ws.title = "顺场表"
-    headers = ["拍摄顺序", "实际拍摄场地", "场次", "剧本中场景", "拍摄内容"]
+    headers = ["拍摄顺序", "实际拍摄场地", "提示", "场次", "剧本中场景", "拍摄内容"]
     headers += ["日\n/\n夜", "内\n/\n外", "页\n数"]
     headers += [vertical(role) for role, _ in roles]
-    headers += ["群演", "梳化服提示", "道具提示", "备注/特殊道具/时间"]
+    headers += ["特约演员", "群演", "VO", "OS", "梳化服提示", "道具提示", "戏用车", "备注/特殊道具/时间"]
     ws.append(headers)
 
     role_names = {role for role, _ in roles}
     for order, scene in enumerate(scenes, start=1):
-        people = set(scene["people"])
         review = scene_review(config, scene["scene"])
+        visible = review.get("on_camera", scene["people"])
+        people = set(visible) if isinstance(visible, list) else set()
+        voices = collect_voices(scene)
         row = [
             order,
             "",
+            reviewed_or_default(review, "hint", ""),
             scene["scene"],
             scene["location"],
             reviewed_or_default(review, "summary", short_summary(scene)),
             scene["day"],
             scene["inside_outside"],
-            "",
+            pages_from_body_lines(review.get("body_line_count", scene.get("body_line_count_draft"))),
         ]
         for role, mark in roles:
             row.append(mark if role in people and role in role_names else "")
         row += [
+            reviewed_or_default(review, "special_actors", ""),
             reviewed_or_default(review, "groups", collect_groups(scene)),
+            reviewed_or_default(review, "vo", voices["vo"]),
+            reviewed_or_default(review, "os", voices["os"]),
             reviewed_or_default(review, "costume", collect_costume(scene)),
             reviewed_or_default(review, "props", collect_props(scene)),
-            reviewed_or_default(review, "notes", collect_notes(scene)),
+            reviewed_or_default(review, "vehicles", ""),
+            "；".join(ordered_unique([
+                reviewed_or_default(review, "notes", collect_notes(scene)),
+                linked_notes.get(scene["scene"], ""),
+            ])),
         ]
         ws.append(row)
 
     style_sheet(ws, len(headers), len(scenes), len(roles))
+    apply_continuity_borders(ws, scenes, continuity_groups)
     wb.save(output)
 
 
 def style_sheet(ws, max_col: int, scene_count: int, role_count: int) -> None:
+    tail_widths = (18, 15, 14, 14, 20, 22, 22, 26)
+    text_columns = [(3, 14), (5, 23), (6, 20)] + [
+        (max_col - len(tail_widths) + 1 + index, width)
+        for index, width in enumerate(tail_widths)
+    ]
     header_fill = PatternFill("solid", fgColor="1F4E5F")
     header_font = Font(name="Microsoft YaHei", color="FFFFFF", bold=True, size=10)
     body_font = Font(name="Microsoft YaHei", color="222222", size=10)
@@ -1028,8 +1201,9 @@ def style_sheet(ws, max_col: int, scene_count: int, role_count: int) -> None:
     white_fill = PatternFill("solid", fgColor="FFFFFF")
     thin = Side(style="thin", color="B8C7CE")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    page_column = next(cell.column for cell in ws[1] if str(cell.value).replace("\n", "") == "页数")
 
-    ws.freeze_panes = "I2"
+    ws.freeze_panes = "J2"
     ws.auto_filter.ref = f"A1:{get_column_letter(max_col)}{scene_count + 1}"
     ws.sheet_view.showGridLines = False
     ws.page_setup.orientation = "landscape"
@@ -1054,16 +1228,9 @@ def style_sheet(ws, max_col: int, scene_count: int, role_count: int) -> None:
             cell.font = body_font
             cell.border = border
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        for col in [4, 5, max_col - 3, max_col - 2, max_col - 1, max_col]:
+        for col, _ in text_columns:
             ws.cell(row=row, column=col).alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
-        text_columns = [
-            (4, 23),
-            (5, 20),
-            (max_col - 3, 15),
-            (max_col - 2, 20),
-            (max_col - 1, 22),
-            (max_col, 26),
-        ]
+        ws.cell(row=row, column=page_column).number_format = "0.0"
         estimated_lines = 1
         for col, width in text_columns:
             value = str(ws.cell(row=row, column=col).value or "")
@@ -1071,18 +1238,16 @@ def style_sheet(ws, max_col: int, scene_count: int, role_count: int) -> None:
             estimated_lines = max(estimated_lines, line_count)
         ws.row_dimensions[row].height = min(108, max(36, 20 * estimated_lines + 8))
 
-    for col, width in {1: 8, 2: 14, 3: 9, 4: 23, 5: 20}.items():
+    for col, width in {1: 8, 2: 14, 3: 14, 4: 9, 5: 23, 6: 20}.items():
         ws.column_dimensions[get_column_letter(col)].width = width
-    for col in range(6, 9):
+    for col in range(7, 10):
         ws.column_dimensions[get_column_letter(col)].width = 4.2
-    role_start = 9
+    role_start = 10
     role_end = role_start + role_count - 1
     for col in range(role_start, role_end + 1):
         ws.column_dimensions[get_column_letter(col)].width = 4.2
-    ws.column_dimensions[get_column_letter(role_end + 1)].width = 15
-    ws.column_dimensions[get_column_letter(role_end + 2)].width = 20
-    ws.column_dimensions[get_column_letter(role_end + 3)].width = 22
-    ws.column_dimensions[get_column_letter(role_end + 4)].width = 26
+    for offset, width in enumerate(tail_widths, start=1):
+        ws.column_dimensions[get_column_letter(role_end + offset)].width = width
 
 
 def title_from_path(path: Path) -> str:

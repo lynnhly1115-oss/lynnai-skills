@@ -190,7 +190,7 @@ class PeopleAndDepartmentTests(unittest.TestCase):
 
         self.assertIn("机械武装队员", builder.collect_groups(scene))
 
-    def test_voice_notes_preserve_vo_and_os_types(self) -> None:
+    def test_draft_voice_columns_preserve_explicit_source_types(self) -> None:
         scene = {
             "location": "办公室",
             "people": ["巡逻员vo"],
@@ -199,11 +199,10 @@ class PeopleAndDepartmentTests(unittest.TestCase):
             "heading_note": "",
         }
 
-        notes = builder.collect_notes(scene)
+        voices = builder.collect_voices(scene)
 
-        self.assertIn("巡逻员VO", notes)
-        self.assertIn("陆锋OS", notes)
-        self.assertNotIn("陆锋VO", notes)
+        self.assertEqual(voices, {"vo": "巡逻员", "os": "陆锋"})
+        self.assertNotIn("巡逻员VO", builder.collect_notes(scene))
 
 
 class DeliveryValidationTests(unittest.TestCase):
@@ -228,10 +227,17 @@ class DeliveryValidationTests(unittest.TestCase):
 
     def test_reviewed_scene_with_explicit_unknowns_can_pass_strict_delivery(self) -> None:
         config = {
+            "roles": [],
+            "continuity_groups": [],
             "scenes": {
                 "1-1": {
                     "reviewed": True,
                     "summary": "城市空镜交代下城区夜间环境",
+                    "body_line_count": 1,
+                    "hint": "",
+                    "on_camera": [],
+                    "vo": "", "os": "", "vehicles": "",
+                    "special_actors": "",
                     "groups": "",
                     "costume": "",
                     "props": "",
@@ -264,13 +270,18 @@ class DeliveryValidationTests(unittest.TestCase):
 
         self.assertTrue(any("角色简称重复" in issue for issue in issues))
 
-    def test_reviewed_fields_feed_the_unchanged_workbook_headers(self) -> None:
+    def test_reviewed_fields_feed_the_workbook_headers_with_special_actors(self) -> None:
         config = {
             "roles": [{"name": "沈晚晴", "mark": "晴"}],
             "scenes": {
                 "1-1": {
                     "reviewed": True,
                     "summary": "城市空镜交代下城区夜间环境",
+                    "body_line_count": 1,
+                    "hint": "",
+                    "on_camera": [],
+                    "vo": "", "os": "", "vehicles": "",
+                    "special_actors": "",
                     "groups": "流民",
                     "costume": "流民：破旧衣服、脏污妆",
                     "props": "雾气特效设备",
@@ -295,6 +306,7 @@ class DeliveryValidationTests(unittest.TestCase):
             [
                 "拍摄顺序",
                 "实际拍摄场地",
+                "提示",
                 "场次",
                 "剧本中场景",
                 "拍摄内容",
@@ -302,18 +314,376 @@ class DeliveryValidationTests(unittest.TestCase):
                 "内\n/\n外",
                 "页\n数",
                 "沈\n晚\n晴",
+                "特约演员",
                 "群演",
+                "VO",
+                "OS",
                 "梳化服提示",
                 "道具提示",
+                "戏用车",
                 "备注/特殊道具/时间",
             ],
         )
-        self.assertEqual(values[4], "城市空镜交代下城区夜间环境")
-        self.assertEqual(values[-4:-1], ["流民", "流民：破旧衣服、脏污妆", "雾气特效设备"])
+        self.assertIsNone(values[2])
+        self.assertEqual(values[3], "1-1")
+        self.assertEqual(values[5], "城市空镜交代下城区夜间环境")
+        self.assertEqual([values[headers.index(name)] for name in ["群演", "梳化服提示", "道具提示"]], ["流民", "流民：破旧衣服、脏污妆", "雾气特效设备"])
         self.assertIn("需要分别拍摄城市全景", values[-1])
-        self.assertEqual(freeze_panes, "I2")
+        self.assertEqual(freeze_panes, "J2")
         self.assertEqual(print_title_rows, "$1:$1")
         self.assertGreater(row_height, 36)
+
+
+class SpecialActorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.scenes = []
+        self.config = {"roles": [{"name": "沈晚晴", "mark": "晴"}], "continuity_groups": [], "scenes": {}}
+        for number in range(1, 4):
+            scene_id = f"1-{number}"
+            body = [
+                "△远处围观群众面目模糊，陈伯单独拦住沈晚晴。",
+                "保安：请先登记。",
+                "护士：我带你进去。",
+            ]
+            self.scenes.append({
+                "scene": scene_id, "location": "医院走廊", "day": "日", "inside_outside": "内",
+                "people": ["沈晚晴", "陈伯", "保安", "护士", "围观群众"],
+                "people_raw": "人物：沈晚晴、陈伯、保安、护士、围观群众",
+                "body": body, "body_text": "\n".join(body), "heading_note": "", "warning": "",
+            })
+            self.config["scenes"][scene_id] = {
+                "reviewed": True, "summary": "沈晚晴被陈伯拦住后接受保安询问",
+                "body_line_count": 1,
+                "hint": "",
+                "on_camera": ["沈晚晴"], "vo": "", "os": "", "vehicles": "",
+                "special_actors": "陈伯、保安、护士", "groups": "围观群众",
+                "costume": "", "props": "", "notes": "",
+            }
+
+    def test_individual_roles_stay_special_across_multiple_scenes(self) -> None:
+        roles = builder.resolve_roles(self.scenes, self.config)
+        self.assertEqual(builder.validation_issues(self.scenes, self.config, roles, strict=True), [])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "schedule.xlsx"
+            builder.build_workbook(Path("fixture.docx"), self.scenes, path, self.config)
+            workbook = load_workbook(path)
+            sheet = workbook["顺场表"]
+            headers = [cell.value for cell in sheet[1]]
+            special_col = headers.index("特约演员") + 1
+            group_col = headers.index("群演") + 1
+            for row in range(2, 5):
+                self.assertEqual(sheet.cell(row, special_col).value, "陈伯、保安、护士")
+                self.assertEqual(sheet.cell(row, group_col).value, "围观群众")
+                self.assertEqual(sheet.cell(row, 10).value, "晴")
+            self.assertEqual(special_col, 11)
+            self.assertTrue(sheet.cell(1, special_col).alignment.wrap_text)
+            self.assertEqual(sheet.auto_filter.ref, "A1:R4")
+            workbook.close()
+
+    def test_reviewed_specials_are_excluded_from_inferred_role_columns(self) -> None:
+        self.config.pop("roles")
+        self.assertEqual(builder.resolve_roles(self.scenes, self.config), [("沈晚晴", "晴")])
+
+    def test_explicit_empty_main_roles_are_respected(self) -> None:
+        self.config["roles"] = []
+        self.assertEqual(builder.resolve_roles(self.scenes, self.config), [])
+
+    def test_strict_build_requires_reviewed_special_actor_field(self) -> None:
+        del self.config["scenes"]["1-1"]["special_actors"]
+        issues = builder.validation_issues(self.scenes, self.config, [("沈晚晴", "晴")], strict=True)
+        self.assertTrue(any("special_actors" in issue for issue in issues))
+
+    def test_strict_build_requires_source_reviewed_role_roster(self) -> None:
+        del self.config["roles"]
+        issues = builder.validation_issues(self.scenes, self.config, [("沈晚晴", "晴")], strict=True)
+        self.assertTrue(any("roles" in issue for issue in issues))
+
+    def test_specials_cannot_also_occupy_main_role_columns(self) -> None:
+        self.config["roles"].append({"name": "陈伯", "mark": "伯"})
+        roles = builder.resolve_roles(self.scenes, self.config)
+        issues = builder.validation_issues(self.scenes, self.config, roles, strict=True)
+        self.assertTrue(any("陈伯" in issue and "独立角色列" in issue for issue in issues))
+
+    def test_special_cannot_revert_to_a_group_in_later_scene(self) -> None:
+        self.config["scenes"]["1-2"]["special_actors"] = "保安、护士"
+        self.config["scenes"]["1-2"]["groups"] = "陈伯、围观群众"
+        issues = builder.validation_issues(self.scenes, self.config, [("沈晚晴", "晴")], strict=True)
+        self.assertTrue(any("1-2" in issue and "陈伯" in issue and "群演" in issue for issue in issues))
+
+    def test_voice_only_role_does_not_enter_special_actor_column(self) -> None:
+        self.config["scenes"]["1-1"]["special_actors"] = "陈伯、保安、护士、医生VO"
+        issues = builder.validation_issues(self.scenes, self.config, [("沈晚晴", "晴")], strict=True)
+        self.assertTrue(any("医生VO" in issue for issue in issues))
+
+
+class VoiceAndVehicleTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.scene = {
+            "scene": "1-1", "location": "院子", "day": "日", "inside_outside": "外",
+            "people": ["沈晚晴", "陆锋", "医生（OS）"], "people_raw": "",
+            "body": ["沈晚晴（VO）：当年我为什么没有离开？", "陆锋OS（门外）：开门！"],
+            "body_text": "沈晚晴（VO）：当年我为什么没有离开？\n陆锋OS（门外）：开门！",
+            "heading_note": "", "warning": "",
+        }
+        self.review = {
+            "reviewed": True, "summary": "沈晚晴听见陆锋喊话后走到门口",
+            "body_line_count": 1,
+            "hint": "",
+            "on_camera": ["沈晚晴"], "special_actors": "", "groups": "",
+            "vo": "沈晚晴（内心独白）", "os": "陆锋（门外喊话）；医生（镜外说话）",
+            "costume": "", "props": "车钥匙", "vehicles": "轿车1辆（院外停放）", "notes": "",
+        }
+        self.config = {
+            "roles": [{"name": "沈晚晴", "mark": "晴"}, {"name": "陆锋", "mark": "锋"}],
+            "continuity_groups": [], "scenes": {"1-1": self.review},
+        }
+
+    def test_voice_only_actor_is_not_marked_visible_but_visible_narrator_is(self) -> None:
+        roles = builder.resolve_roles([self.scene], self.config)
+        self.assertEqual(builder.validation_issues([self.scene], self.config, roles, strict=True), [])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "voices.xlsx"
+            builder.build_workbook(Path("fixture.docx"), [self.scene], path, self.config)
+            workbook = load_workbook(path)
+            sheet = workbook["顺场表"]
+            headers = [cell.value for cell in sheet[1]]
+            values = dict(zip(headers, [cell.value for cell in sheet[2]]))
+            self.assertEqual(values["沈\n晚\n晴"], "晴")
+            self.assertIsNone(values["陆\n锋"])
+            self.assertEqual(values["VO"], self.review["vo"])
+            self.assertEqual(values["OS"], self.review["os"])
+            self.assertEqual(values["戏用车"], self.review["vehicles"])
+            self.assertEqual(values["道具提示"], "车钥匙")
+            self.assertEqual(headers[-8:], ["特约演员", "群演", "VO", "OS", "梳化服提示", "道具提示", "戏用车", "备注/特殊道具/时间"])
+            workbook.close()
+
+    def test_parenthesized_voice_tags_are_not_lost_from_people_list(self) -> None:
+        people = builder.split_people("人物：沈晚晴（VO）、陆锋（OS）")
+        self.assertTrue(all(builder.is_voice_name(name) for name in people))
+        self.assertEqual(builder.infer_roles([{"people": people}]), [])
+        self.assertEqual(builder.collect_voices(self.scene), {"vo": "沈晚晴", "os": "医生、陆锋"})
+
+    def test_generic_phone_or_broadcast_sound_is_not_automatically_vo(self) -> None:
+        scene = dict(self.scene, people=["医生电话声", "播音员广播声"], body_text="医生电话声：明天见。\n播音员广播声：现在开始。")
+        self.assertEqual(builder.collect_voices(scene), {"vo": "", "os": ""})
+        notes = builder.collect_notes(scene)
+        self.assertIn("需确认", notes)
+        self.assertNotIn("含VO", notes)
+
+    def test_reviewed_voice_classification_can_correct_source_with_a_note(self) -> None:
+        self.review.update(vo="陆锋（内心独白）", os="", notes="原文标OS，但正文为内心独白，按VO暂列，待编剧确认")
+        self.assertEqual(builder.validation_issues([self.scene], self.config, builder.resolve_roles([self.scene], self.config), strict=True), [])
+
+    def test_strict_review_requires_voice_vehicle_and_visible_cast_fields(self) -> None:
+        for field in ["hint", "vo", "os", "vehicles", "on_camera"]:
+            with self.subTest(field=field):
+                saved = self.review.pop(field)
+                issues = builder.validation_issues([self.scene], self.config, builder.resolve_roles([self.scene], self.config), strict=True)
+                self.assertTrue(any(field in issue for issue in issues))
+                self.review[field] = saved
+
+    def test_visible_cast_override_requires_a_list_of_reviewed_individual_roles(self) -> None:
+        for value in ["沈晚晴", ["沈晚晴VO"], ["不在主要角色表中的人"]]:
+            with self.subTest(value=value):
+                self.review["on_camera"] = value
+                issues = builder.validation_issues([self.scene], self.config, builder.resolve_roles([self.scene], self.config), strict=True)
+                self.assertTrue(any("on_camera" in issue for issue in issues))
+
+
+class PageCountTests(unittest.TestCase):
+    def test_every_three_body_lines_round_up_to_one_tenth(self) -> None:
+        expected = {1: 0.1, 2: 0.1, 3: 0.1, 4: 0.2, 6: 0.2, 7: 0.3,
+                    27: 0.9, 28: 1.0, 30: 1.0, 31: 1.1, 33: 1.1, 34: 1.2,
+                    60: 2.0, 61: 2.1, 90: 3.0}
+        for line_count, pages in expected.items():
+            with self.subTest(line_count=line_count):
+                self.assertEqual(builder.pages_from_body_lines(line_count), pages)
+
+    def test_unknown_or_invalid_count_does_not_invent_pages(self) -> None:
+        for value in [None, 0, -3, 3.5, "30", True]:
+            with self.subTest(value=value):
+                self.assertEqual(builder.pages_from_body_lines(value), "需确认")
+
+    def test_word_paragraph_count_is_not_used_as_a_layout_line_count(self) -> None:
+        document = Document()
+        document.add_paragraph("第一集")
+        document.add_paragraph("1-1 办公室 日 内")
+        document.add_paragraph("人物：沈晚晴")
+        document.add_paragraph("△" + "沈晚晴翻阅文件。" * 50)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "wrapped.docx"
+            document.save(path)
+            scenes = builder.parse_docx(path)
+        self.assertIsNone(scenes[0].get("body_line_count_draft"))
+        self.assertIn("原排版", scenes[0].get("body_line_count_basis", ""))
+
+    def test_reviewed_count_drives_numeric_excel_value_and_one_decimal_display(self) -> None:
+        fixture = VoiceAndVehicleTests()
+        fixture.setUp()
+        fixture.review["body_line_count"] = 30
+        fixture.scene["body_line_count_draft"] = 4
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "pages.xlsx"
+            builder.build_workbook(Path("fixture.docx"), [fixture.scene], path, fixture.config)
+            workbook = load_workbook(path)
+            sheet = workbook["顺场表"]
+            page_col = next(cell.column for cell in sheet[1] if str(cell.value).replace("\n", "") == "页数")
+            self.assertEqual(sheet.cell(2, page_col).value, 1.0)
+            self.assertEqual(sheet.cell(2, page_col).data_type, "n")
+            self.assertEqual(sheet.cell(2, page_col).number_format, "0.0")
+            workbook.close()
+
+    def test_strict_build_requires_reviewed_count_and_explains_unknown_pages(self) -> None:
+        fixture = VoiceAndVehicleTests()
+        fixture.setUp()
+        roles = builder.resolve_roles([fixture.scene], fixture.config)
+        del fixture.review["body_line_count"]
+        self.assertTrue(any("body_line_count" in issue for issue in builder.validation_issues([fixture.scene], fixture.config, roles, strict=True)))
+        fixture.review["body_line_count"] = None
+        self.assertTrue(any("页数需确认" in issue for issue in builder.validation_issues([fixture.scene], fixture.config, roles, strict=True)))
+        fixture.review["notes"] = "原排版暂无法核行，页数需确认"
+        self.assertEqual(builder.validation_issues([fixture.scene], fixture.config, roles, strict=True), [])
+        fixture.review["body_line_count"] = -1
+        self.assertTrue(any("body_line_count" in issue for issue in builder.validation_issues([fixture.scene], fixture.config, roles, strict=True)))
+
+
+class ContinuityBorderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.scenes = []
+        self.config = {"roles": [], "continuity_groups": [], "scenes": {}}
+        for number in range(1, 7):
+            scene_id = f"1-{number}"
+            self.scenes.append({
+                "scene": scene_id, "location": "院子", "day": "日", "inside_outside": "外",
+                "people": [], "people_raw": "", "body": [], "body_text": "",
+                "heading_note": "", "warning": "",
+            })
+            self.config["scenes"][scene_id] = {
+                "reviewed": True, "summary": "沈晚晴跑出院子后陆锋紧随追出",
+                "main_location": "同一宅院",
+                "body_line_count": 1,
+                "hint": "",
+                "on_camera": [], "vo": "", "os": "", "vehicles": "",
+                "special_actors": "", "groups": "", "costume": "", "props": "", "notes": "原有备注",
+            }
+
+    def group(self, *scene_ids: str) -> dict:
+        return {"scenes": list(scene_ids), "reviewed": True, "reason": "同一宅院内前场人物跑出，后场紧接追赶，剧情时间及行动连续"}
+
+    def workbook(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "continuity.xlsx"
+            builder.build_workbook(Path("fixture.docx"), self.scenes, path, self.config)
+            return load_workbook(path)
+
+    def edges(self, cell):
+        return tuple(getattr(cell.border, side).style for side in ("left", "right", "top", "bottom"))
+
+    def test_contiguous_group_gets_one_outer_box_only_in_scene_column(self) -> None:
+        self.config["continuity_groups"] = [self.group("1-1", "1-2", "1-3")]
+        self.config["scenes"]["1-1"]["hint"] = "雨／烟机／武戏"
+        self.assertEqual(builder.validation_issues(self.scenes, self.config, [], strict=True), [])
+        workbook = self.workbook()
+        sheet = workbook["顺场表"]
+        self.assertEqual(self.edges(sheet["D2"]), ("thick", "thick", "thick", "thin"))
+        self.assertEqual(self.edges(sheet["D3"]), ("thick", "thick", "thin", "thin"))
+        self.assertEqual(self.edges(sheet["D4"]), ("thick", "thick", "thin", "thick"))
+        for row in sheet:
+            for cell in row:
+                if cell.coordinate in {"D2", "D3", "D4"}:
+                    self.assertEqual(cell.border.left.color.rgb[-6:], "000000")
+                    self.assertFalse(cell.font.bold)
+                else:
+                    self.assertEqual(self.edges(cell), ("thin",) * 4)
+        self.assertEqual([sheet.cell(row, 4).value for row in range(2, 8)], [s["scene"] for s in self.scenes])
+        self.assertFalse(sheet.merged_cells.ranges)
+        self.assertEqual(sheet.max_column, 17)
+        self.assertEqual(sheet.freeze_panes, "J2")
+        self.assertEqual(sheet["C2"].value, "雨／烟机／武戏")
+        self.assertEqual(sheet["Q2"].value, "原有备注")
+        workbook.close()
+
+    def test_intercut_scene_is_excluded_and_separate_runs_are_linked(self) -> None:
+        self.config["continuity_groups"] = [self.group("1-1", "1-3", "1-4")]
+        workbook = self.workbook()
+        sheet = workbook["顺场表"]
+        self.assertEqual(self.edges(sheet["D2"]), ("thick",) * 4)
+        self.assertEqual(self.edges(sheet["D3"]), ("thin",) * 4)
+        self.assertEqual(self.edges(sheet["D4"]), ("thick", "thick", "thick", "thin"))
+        self.assertEqual(self.edges(sheet["D5"]), ("thick", "thick", "thin", "thick"))
+        self.assertEqual(sheet["Q2"].value, "原有备注；连场1；续1-3")
+        self.assertEqual(sheet["Q3"].value, "原有备注")
+        self.assertEqual(sheet["Q4"].value, "原有备注；连场1；接1-1；续1-4")
+        workbook.close()
+
+    def test_touching_groups_keep_their_separate_top_and_bottom_edges(self) -> None:
+        self.config["continuity_groups"] = [self.group("1-1", "1-2"), self.group("1-3", "1-4")]
+        workbook = self.workbook()
+        sheet = workbook["顺场表"]
+        self.assertEqual(sheet["D3"].border.bottom.style, "thick")
+        self.assertEqual(sheet["D4"].border.top.style, "thick")
+        workbook.close()
+
+    def test_same_location_day_and_adjacent_numbers_do_not_auto_group(self) -> None:
+        workbook = self.workbook()
+        sheet = workbook["顺场表"]
+        for row in range(2, 8):
+            self.assertEqual(self.edges(sheet.cell(row, 4)), ("thin",) * 4)
+        workbook.close()
+
+    def test_strict_build_requires_explicit_continuity_review_even_when_none(self) -> None:
+        del self.config["continuity_groups"]
+        issues = builder.validation_issues(self.scenes, self.config, [], strict=True)
+        self.assertTrue(any("连场" in issue for issue in issues))
+
+    def test_same_main_location_allows_continuous_different_subspaces(self) -> None:
+        self.scenes[0]["location"] = "沈宅·客厅"
+        self.scenes[1]["location"] = "沈宅·走廊"
+        for scene_id in ("1-1", "1-2"):
+            self.config["scenes"][scene_id]["main_location"] = "沈宅"
+        self.config["continuity_groups"] = [self.group("1-1", "1-2")]
+        self.assertEqual(builder.resolve_continuity_groups(self.scenes, self.config), ([["1-1", "1-2"]], []))
+
+    def test_cross_main_location_is_rejected_and_not_boxed(self) -> None:
+        self.config["scenes"]["1-1"]["main_location"] = "沈宅"
+        self.config["scenes"]["1-2"]["main_location"] = "警局"
+        self.config["continuity_groups"] = [self.group("1-1", "1-2")]
+        groups, issues = builder.resolve_continuity_groups(self.scenes, self.config)
+        self.assertEqual(groups, [])
+        self.assertTrue(any("跨主场景" in issue for issue in issues))
+        workbook = self.workbook()
+        for address in ("D2", "D3"):
+            self.assertEqual(self.edges(workbook["顺场表"][address]), ("thin",) * 4)
+        workbook.close()
+
+    def test_missing_main_location_fails_continuity_review(self) -> None:
+        del self.config["scenes"]["1-2"]["main_location"]
+        self.config["continuity_groups"] = [self.group("1-1", "1-2")]
+        issues = builder.validation_issues(self.scenes, self.config, [], strict=True)
+        self.assertTrue(any("main_location" in issue and "1-2" in issue for issue in issues))
+
+    def test_invalid_groups_are_reported(self) -> None:
+        cases = {
+            "unknown": [self.group("1-1", "9-9")],
+            "duplicate": [self.group("1-1", "1-1")],
+            "single": [self.group("1-1")],
+            "overlap": [self.group("1-1", "1-2"), self.group("1-2", "1-3")],
+            "reversed": [self.group("1-2", "1-1")],
+            "unreviewed": [dict(self.group("1-1", "1-2"), reviewed=False)],
+            "no_evidence": [dict(self.group("1-1", "1-2"), reason="")],
+            "wrong_type": "1-1、1-2",
+        }
+        for label, groups in cases.items():
+            with self.subTest(label=label):
+                self.config["continuity_groups"] = groups
+                issues = builder.validation_issues(self.scenes, self.config, [], strict=True)
+                self.assertTrue(any("连场" in issue for issue in issues))
+
+    def test_unreviewed_group_does_not_get_a_confirmed_border_in_draft(self) -> None:
+        self.config["continuity_groups"] = [dict(self.group("1-1", "1-2"), reviewed=False)]
+        workbook = self.workbook()
+        self.assertEqual(self.edges(workbook["顺场表"]["D2"]), ("thin",) * 4)
+        workbook.close()
 
 
 if __name__ == "__main__":

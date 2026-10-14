@@ -1,4 +1,4 @@
 interface:
   display_name: "短剧顺场表"
   short_description: "把短剧剧本整理成经逐场复核的单表顺场表 Excel"
-  default_prompt: "Use $duanju-schedule-table to turn this complete short-drama script into a strictly checked, single-sheet Excel 顺场表."
+  default_prompt: "Use $duanju-schedule-table to create a checked Excel 顺场表, automatically giving every named plot character and each childhood version an individual column without asking for roster confirmation, and boxing only scenes that share a main location and continuous plot."
